@@ -133,6 +133,36 @@ def confirm_authorization(target: str, assume_yes: bool = False) -> bool:
     return granted
 
 
+def detect_lhost(target: str) -> str:
+    """Detect the local IP the kernel would use to reach ``target``.
+
+    Opens a UDP socket toward the target (no packets are actually sent) and
+    reads back the chosen source address. Falls back to 127.0.0.1 on failure.
+    """
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((target, 9))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _stop_proc(proc) -> None:
+    """Terminate a process we started, forcing a kill if it does not stop."""
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:  # noqa: BLE001 - best-effort teardown
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="shellforge",
@@ -179,6 +209,15 @@ def main(argv: list[str] | None = None) -> int:
 
     LOG.info("Hedef: %s", args.target)
 
+    # Auto-detect LHOST so the user never has to edit config for a basic run.
+    handler = config.setdefault("handler", {})
+    lhost = str(handler.get("lhost") or "").strip()
+    if lhost.lower() in ("", "auto"):
+        detected = detect_lhost(args.target)
+        handler["lhost"] = detected
+        LOG.info("LHOST otomatik belirlendi: %s", detected)
+        print(f"[*] LHOST otomatik belirlendi: {detected}")
+
     # --- Authorization gate -------------------------------------------------
     if not confirm_authorization(args.target, assume_yes=args.yes):
         LOG.warning("Yetki verilmedi. Tarama yapılmadan çıkılıyor.")
@@ -186,12 +225,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     the_executor: execmod.Executor | None = None
+    msf_proc = None  # msfrpcd process if shellforge started it
 
     def handle_sigint(signum, frame):  # noqa: ANN001 - signal handler signature
         LOG.warning("Ctrl+C alındı -- durduruluyor ve temizleniyor.")
         print("\n[!] Kesildi. shellforge'un açtığı oturumlar temizleniyor...")
         if the_executor is not None:
             the_executor.cleanup()
+        if msf_proc is not None:
+            _stop_proc(msf_proc)
         sys.exit(130)
 
     signal.signal(signal.SIGINT, handle_sigint)
@@ -215,15 +257,18 @@ def main(argv: list[str] | None = None) -> int:
             _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
             return 0
 
-        # --- 2. CONNECT + MATCH --------------------------------------------
+        # --- 2. CONNECT (auto-start msfrpcd if needed) + MATCH -------------
         msf_cfg = config.get("msfrpc", {})
-        client = execmod.connect(
+        print("[*] Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)...")
+        client, msf_proc = execmod.connect_or_start(
             host=msf_cfg.get("host", "127.0.0.1"),
             port=int(msf_cfg.get("port", 55553)),
             user=msf_cfg.get("user", "msf"),
             password=msf_cfg.get("password", "msf"),
             ssl=bool(msf_cfg.get("ssl", True)),
         )
+        if msf_proc is not None:
+            print(f"[*] msfrpcd otomatik başlatıldı (PID {msf_proc.pid}).")
 
         matches = matcher.match_services(
             open_services,
@@ -234,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
         if not candidates:
             print("[!] Denenebilir Metasploit adayı bulunamadı. Exploit-DB eşleşmeleri için rapora bak.")
             _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
+            if msf_proc is not None:
+                _stop_proc(msf_proc)
             return 0
 
         print(f"[*] {len(candidates)} aday modül sıraya alındı (en güvenilir önce).")
@@ -251,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         LOG.exception("Beklenmeyen hata: %s", exc)
         print(f"[!] Beklenmeyen hata: {exc}")
         _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
+        if msf_proc is not None:
+            _stop_proc(msf_proc)
         return 1
 
     # --- 6. REPORT ----------------------------------------------------------
@@ -263,6 +312,18 @@ def main(argv: list[str] | None = None) -> int:
         print("\n[-] Shell alınamadı. Tüm adaylar denendi.")
     print(f"[*] JSON rapor: {json_path}")
     print(f"[*] MD rapor:   {md_path}")
+
+    # If shellforge started msfrpcd: keep it alive when a session landed so the
+    # shell survives; otherwise shut it back down to avoid leaving a daemon.
+    if msf_proc is not None:
+        if succeeded:
+            print(f"[*] msfrpcd açık bırakıldı (PID {msf_proc.pid}) — oturum yaşasın diye.")
+            print(f"    Oturuma bağlanmak için: msfconsole -> sessions -i <id>")
+            print(f"    msfrpcd'yi durdurmak için: kill {msf_proc.pid}")
+        else:
+            _stop_proc(msf_proc)
+            print("[*] Otomatik başlatılan msfrpcd kapatıldı.")
+
     return 0 if succeeded else 4
 
 

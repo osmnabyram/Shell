@@ -75,57 +75,64 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-cp config.yaml.example config.yaml   # then edit for your lab network
+cp config.yaml.example config.yaml
 ```
 
-Edit `config.yaml` and set at least:
+The defaults work out of the box for a local lab — no editing required:
 
-- `handler.lhost` — your attacking machine's IP on the lab network.
-- `msfrpc.password` — the password you start `msfrpcd` with (see below).
+- `handler.lhost` defaults to `auto`; shellforge detects your attacking IP
+  from the route to the target. Override it only if the wrong interface is
+  picked.
+- If `msfrpcd` is not already running, shellforge **starts it automatically**
+  using the user/password/port in `config.yaml` (default `msf` / `msf` /
+  `55553`) and shuts it back down afterwards (kept alive if a session landed).
 
----
-
-## Start the Metasploit RPC daemon
-
-shellforge talks to Metasploit over msfrpc and will **not** start services for
-you. In a separate terminal:
-
-```bash
-msfrpcd -U msf -P msf -p 55553 -a 127.0.0.1
-```
-
-Use the same user/password/port in `config.yaml`. If shellforge cannot connect,
-it prints this exact command and exits.
+> The UI is in Turkish; code, config and this README are in English.
 
 ---
 
 ## Usage
 
+Just run it and enter the target when asked:
+
 ```bash
-python3 shellforge.py --target 192.168.56.101
+python3 shellforge.py
 ```
 
-Example session:
-
 ```text
-[?] Is 192.168.56.101 a lab you own or have WRITTEN permission to test? [y/N] y
-[*] 7 candidate module(s) queued (most reliable first).
+[?] Kurban IP (tek adres): 192.168.56.101
+[?] 192.168.56.101 sana ait VEYA test için YAZILI iznin olan bir lab mı? [e/H] e
+[*] LHOST otomatik belirlendi: 192.168.56.1
+[*] Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)...
 ...
-[+] SHELL OBTAINED. See report for session details and proof.
-[*] JSON report: reports/shellforge_192.168.56.101_20261107_143201.json
-[*] MD report:   reports/shellforge_192.168.56.101_20261107_143201.md
+[+] SHELL ALINDI! Oturum detayları ve kanıt için rapora bak.
+```
+
+You can also pass the target non-interactively:
+
+```bash
+python3 shellforge.py --target 192.168.56.101
 ```
 
 Options:
 
 | Flag | Description |
 | --- | --- |
-| `--target <IP>` | Single target IP (required). CIDR/ranges/lists rejected. |
+| `--target <IP>` | Single target IP. CIDR/ranges/lists rejected. If omitted, you are prompted. |
 | `--config <path>` | Config file (default `config.yaml`). |
 | `--yes` | Pre-confirm the authorization prompt for unattended lab runs (still logged). |
 
 Exit codes: `0` success/clean no-op · `1` cancelled or error · `3` msfrpc
 unreachable · `4` no shell obtained.
+
+### Optional: start msfrpcd yourself
+
+Auto-start covers the common case. If you prefer to run the daemon manually
+(e.g. to watch its output), start it first and shellforge will reuse it:
+
+```bash
+msfrpcd -U msf -P msf -p 55553 -a 127.0.0.1
+```
 
 ---
 

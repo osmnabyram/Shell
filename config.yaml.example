@@ -9,9 +9,11 @@ msfrpc:
   ssl: true            # msfrpcd enables SSL by default
 
 handler:
-  # LHOST is YOUR attacking machine's IP on the lab network (e.g. the
-  # host-only / VirtualBox adapter facing Metasploitable). Not the target.
-  lhost: 192.168.56.1
+  # LHOST is YOUR attacking machine's IP on the lab network (the interface
+  # facing the target), NOT the target. Leave as "auto" to let shellforge
+  # detect it automatically from the route to the target; override with a
+  # fixed IP only if auto-detection picks the wrong interface.
+  lhost: auto
   # Reverse handler ports are picked from this inclusive range.
   lport_range: [4444, 4454]
 

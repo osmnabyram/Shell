@@ -16,6 +16,8 @@ The executor only ever touches the single target address handed to it.
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -95,6 +97,74 @@ def connect(
         client.core.version.get("version", "?"),
     )
     return client
+
+
+def start_msfrpcd(
+    host: str, port: int, user: str, password: str, ssl: bool = True
+) -> subprocess.Popen:
+    """Launch msfrpcd in the background and return the process handle."""
+    cmd = ["msfrpcd", "-U", user, "-P", password, "-p", str(port), "-a", host]
+    if not ssl:
+        cmd.append("-S")  # -S disables SSL
+    logger.info("msfrpcd başlatılıyor: %s", " ".join(cmd))
+    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def connect_or_start(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    ssl: bool = True,
+    boot_timeout: int = 60,
+) -> tuple[Any, subprocess.Popen | None]:
+    """Connect to msfrpcd, auto-starting the daemon if it is not running.
+
+    Returns:
+        ``(client, started_proc)`` where ``started_proc`` is the process this
+        function spawned, or ``None`` if a daemon was already running.
+
+    Raises:
+        MsfConnectionError: If msfrpcd is not installed, dies on startup, or
+            does not become reachable within ``boot_timeout`` seconds.
+    """
+    # Reuse an already-running daemon if there is one.
+    try:
+        return connect(host, port, user, password, ssl), None
+    except MsfConnectionError:
+        logger.info("Çalışan msfrpcd bulunamadı; otomatik başlatılıyor.")
+
+    if shutil.which("msfrpcd") is None:
+        raise MsfConnectionError(
+            "msfrpcd PATH'te bulunamadı. Metasploit kurulu mu?\n"
+            "    Kurulum: sudo apt install metasploit-framework"
+        )
+
+    proc = start_msfrpcd(host, port, user, password, ssl)
+    deadline = time.time() + boot_timeout
+    last_err = ""
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise MsfConnectionError(
+                f"msfrpcd başlatıldı ama beklenmedik şekilde kapandı "
+                f"(çıkış kodu {proc.returncode}). 'msfrpcd' komutunu elle "
+                "çalıştırıp hatayı görebilirsin."
+            )
+        try:
+            client = connect(host, port, user, password, ssl)
+            logger.info("msfrpcd otomatik başlatıldı ve bağlanıldı.")
+            return client, proc
+        except MsfConnectionError as exc:
+            last_err = str(exc).splitlines()[0]
+            time.sleep(3)
+
+    try:
+        proc.terminate()
+    except Exception:  # noqa: BLE001
+        pass
+    raise MsfConnectionError(
+        f"msfrpcd {boot_timeout} sn içinde hazır olmadı. Son hata: {last_err}"
+    )
 
 
 def _select_payload(exploit: Any, preferences: dict[str, str]) -> str:
