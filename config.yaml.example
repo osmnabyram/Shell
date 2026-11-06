@@ -1,0 +1,38 @@
+# shellforge configuration (example values — safe defaults for a local lab)
+# Copy to config.yaml and adjust for your lab network.
+
+msfrpc:
+  host: 127.0.0.1
+  port: 55553
+  user: msf
+  password: msf        # CHANGE THIS — must match the password you start msfrpcd with
+  ssl: true            # msfrpcd enables SSL by default
+
+handler:
+  # LHOST is YOUR attacking machine's IP on the lab network (e.g. the
+  # host-only / VirtualBox adapter facing Metasploitable). Not the target.
+  lhost: 192.168.56.1
+  # Reverse handler ports are picked from this inclusive range.
+  lport_range: [4444, 4454]
+
+execution:
+  max_attempts: 5            # stop after this many candidate exploits
+  delay_between_attempts: 10 # seconds to wait between attempts
+  check_before_fire: true    # run module check() as a dry-run first when supported
+
+# Preferred reverse payloads per platform/arch. The first one that is
+# compatible with a given exploit module is used; otherwise a generic
+# fallback is chosen from the module's compatible payload list.
+payloads:
+  linux_x86: linux/x86/meterpreter/reverse_tcp
+  linux_x64: linux/x64/meterpreter/reverse_tcp
+  windows_x86: windows/meterpreter/reverse_tcp
+  windows_x64: windows/x64/meterpreter/reverse_tcp
+  generic: generic/shell_reverse_tcp
+
+recon:
+  nmap_arguments: "-sV -Pn"  # -oX is added automatically for XML parsing
+  timeout: 300               # seconds
+
+searchsploit:
+  enabled: true              # include Exploit-DB matches in the report (informational)

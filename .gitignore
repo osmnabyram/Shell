@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Runtime output
+reports/
+*.log
+
+# Local config (keep only config.yaml.example in VCS — never commit real creds)
+config.yaml
+config.local.yaml
