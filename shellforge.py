@@ -35,7 +35,7 @@ BANNER = r"""
  | |__  __ _| | |/ _|___ _ _ __ _ ___
  | '_ \/ _` | | |  _/ _ \ '_/ _` / -_)
  |_.__/\__,_|_|_|_| \___/_| \__, \___|   shellforge
-                            |___/        authorized lab use only
+                            |___/        yalnizca yetkili lab kullanimi
 """
 
 
@@ -52,7 +52,7 @@ def setup_logging(target: str, reports_dir: Path) -> None:
             logging.FileHandler(logfile, encoding="utf-8"),
         ],
     )
-    LOG.info("Logging to %s", logfile)
+    LOG.info("Günlük dosyası: %s", logfile)
 
 
 def validate_single_ip(value: str) -> str:
@@ -62,17 +62,17 @@ def validate_single_ip(value: str) -> str:
         argparse.ArgumentTypeError: On anything that is not a single IP.
     """
     raw = value.strip()
-    for bad, label in (("/", "CIDR"), (",", "list"), (" ", "list"), ("-", "range")):
+    for bad, label in (("/", "CIDR"), (",", "liste"), (" ", "liste"), ("-", "aralık")):
         if bad in raw:
             raise argparse.ArgumentTypeError(
-                f"--target must be a single IP address; {label} input ('{raw}') "
-                "is not allowed. shellforge is a single-host, lab-only tool."
+                f"Tek bir IP adresi girilmeli; {label} girişi ('{raw}') kabul "
+                "edilmez. shellforge tek hedefli, yalnızca lab içindir."
             )
     try:
         ip = ipaddress.ip_address(raw)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"'{raw}' is not a valid IP address: {exc}"
+            f"'{raw}' geçerli bir IP adresi değil: {exc}"
         ) from exc
     return str(ip)
 
@@ -84,12 +84,12 @@ def prompt_for_target() -> str | None:
     cancels (empty input + Ctrl+C / EOF).
     """
     print(BANNER)
-    print("Otonom lab exploit zinciri. Tek hedef, sadece yetkili lab.\n")
+    print("Otonom lab exploit zinciri. Tek hedef, yalnızca yetkili lab.\n")
     try:
         while True:
             raw = input("[?] Kurban IP (tek adres): ").strip()
             if not raw:
-                print("    (Bos. Cikmak icin Ctrl+C.)")
+                print("    (Boş. Çıkmak için Ctrl+C.)")
                 continue
             try:
                 return validate_single_ip(raw)
@@ -105,7 +105,7 @@ def load_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.exists():
         print(
-            f"[!] Config '{p}' not found. Copy the template first:\n"
+            f"[!] Yapılandırma dosyası '{p}' bulunamadı. Önce şablonu kopyala:\n"
             f"      cp config.yaml.example {p}\n",
             file=sys.stderr,
         )
@@ -117,19 +117,19 @@ def load_config(path: str | Path) -> dict:
 def confirm_authorization(target: str, assume_yes: bool = False) -> bool:
     """Interactive authorization gate. Returns True only on explicit 'y'."""
     question = (
-        f"\n[?] Is {target} a lab you own or have WRITTEN permission to test? [y/N] "
+        f"\n[?] {target} sana ait VEYA test için YAZILI iznin olan bir lab mı? [e/H] "
     )
     if assume_yes:
-        LOG.warning("Authorization auto-confirmed via --yes for target %s", target)
-        print(question + "y (via --yes)")
+        LOG.warning("Yetki --yes ile otomatik onaylandı, hedef %s", target)
+        print(question + "e (--yes ile)")
         return True
     try:
         answer = input(question).strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
         return False
-    granted = answer == "y"
-    LOG.info("Authorization prompt for %s -> %s", target, "GRANTED" if granted else "DENIED")
+    granted = answer in ("e", "evet", "y", "yes")
+    LOG.info("Yetki onayı %s -> %s", target, "ONAYLANDI" if granted else "REDDEDİLDİ")
     return granted
 
 
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         resolved = prompt_for_target()
         if resolved is None:
-            print("[!] Hedef girilmedi. Cikiliyor.")
+            print("[!] Hedef girilmedi. Çıkılıyor.")
             return 1
         args.target = resolved
 
@@ -177,19 +177,19 @@ def main(argv: list[str] | None = None) -> int:
     reports_dir = Path("reports")
     setup_logging(args.target, reports_dir)
 
-    LOG.info("Target: %s", args.target)
+    LOG.info("Hedef: %s", args.target)
 
     # --- Authorization gate -------------------------------------------------
     if not confirm_authorization(args.target, assume_yes=args.yes):
-        LOG.warning("Authorization not granted. Exiting without scanning.")
-        print("[!] Authorization not granted. Nothing was scanned. Exiting.")
+        LOG.warning("Yetki verilmedi. Tarama yapılmadan çıkılıyor.")
+        print("[!] Yetki verilmedi. Hiçbir şey taranmadı. Çıkılıyor.")
         return 1
 
     the_executor: execmod.Executor | None = None
 
     def handle_sigint(signum, frame):  # noqa: ANN001 - signal handler signature
-        LOG.warning("Ctrl+C received -- stopping and cleaning up.")
-        print("\n[!] Interrupted. Cleaning up sessions shellforge opened...")
+        LOG.warning("Ctrl+C alındı -- durduruluyor ve temizleniyor.")
+        print("\n[!] Kesildi. shellforge'un açtığı oturumlar temizleniyor...")
         if the_executor is not None:
             the_executor.cleanup()
         sys.exit(130)
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         open_services = recon_result.open_services()
         if not open_services:
-            print("[!] No open services found. Nothing to do.")
+            print("[!] Açık servis bulunamadı. Yapılacak bir şey yok.")
             _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
             return 0
 
@@ -232,11 +232,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         candidates = matcher.flatten_candidates(matches)
         if not candidates:
-            print("[!] No actionable Metasploit candidates found. See report for Exploit-DB hits.")
+            print("[!] Denenebilir Metasploit adayı bulunamadı. Exploit-DB eşleşmeleri için rapora bak.")
             _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
             return 0
 
-        print(f"[*] {len(candidates)} candidate module(s) queued (most reliable first).")
+        print(f"[*] {len(candidates)} aday modül sıraya alındı (en güvenilir önce).")
 
         # --- 3-5. DRY-RUN + FIRE + VERIFY ----------------------------------
         the_executor = execmod.Executor(client, args.target, config)
@@ -248,8 +248,8 @@ def main(argv: list[str] | None = None) -> int:
         _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
         return 3
     except Exception as exc:  # noqa: BLE001 - top-level guard
-        LOG.exception("Unexpected error: %s", exc)
-        print(f"[!] Unexpected error: {exc}")
+        LOG.exception("Beklenmeyen hata: %s", exc)
+        print(f"[!] Beklenmeyen hata: {exc}")
         _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
         return 1
 
@@ -258,11 +258,11 @@ def main(argv: list[str] | None = None) -> int:
 
     succeeded = any(getattr(a, "success", False) for a in attempts)
     if succeeded:
-        print("\n[+] SHELL OBTAINED. See report for session details and proof.")
+        print("\n[+] SHELL ALINDI! Oturum detayları ve kanıt için rapora bak.")
     else:
-        print("\n[-] No shell obtained. All candidates exhausted.")
-    print(f"[*] JSON report: {json_path}")
-    print(f"[*] MD report:   {md_path}")
+        print("\n[-] Shell alınamadı. Tüm adaylar denendi.")
+    print(f"[*] JSON rapor: {json_path}")
+    print(f"[*] MD rapor:   {md_path}")
     return 0 if succeeded else 4
 
 
