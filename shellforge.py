@@ -77,6 +77,29 @@ def validate_single_ip(value: str) -> str:
     return str(ip)
 
 
+def prompt_for_target() -> str | None:
+    """Interactively ask the user for the single target IP.
+
+    Loops until a valid single IP is entered. Returns ``None`` if the user
+    cancels (empty input + Ctrl+C / EOF).
+    """
+    print(BANNER)
+    print("Otonom lab exploit zinciri. Tek hedef, sadece yetkili lab.\n")
+    try:
+        while True:
+            raw = input("[?] Kurban IP (tek adres): ").strip()
+            if not raw:
+                print("    (Bos. Cikmak icin Ctrl+C.)")
+                continue
+            try:
+                return validate_single_ip(raw)
+            except argparse.ArgumentTypeError as exc:
+                print(f"    [!] {exc}\n")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+
 def load_config(path: str | Path) -> dict:
     """Load YAML config, or exit with a hint if it is missing."""
     p = Path(path)
@@ -118,9 +141,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--target",
-        required=True,
-        type=validate_single_ip,
-        help="A single target IP address (no CIDR/range/list/file).",
+        default=None,
+        help="A single target IP address (no CIDR/range/list/file). "
+        "If omitted, shellforge asks for it interactively.",
     )
     parser.add_argument(
         "--config",
@@ -135,11 +158,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Resolve the target: from --target if given (validated here), otherwise
+    # ask the user interactively.
+    if args.target:
+        print(BANNER)
+        try:
+            args.target = validate_single_ip(args.target)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(str(exc))
+    else:
+        resolved = prompt_for_target()
+        if resolved is None:
+            print("[!] Hedef girilmedi. Cikiliyor.")
+            return 1
+        args.target = resolved
+
     config = load_config(args.config)
     reports_dir = Path("reports")
     setup_logging(args.target, reports_dir)
 
-    print(BANNER)
     LOG.info("Target: %s", args.target)
 
     # --- Authorization gate -------------------------------------------------
