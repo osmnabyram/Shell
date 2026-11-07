@@ -397,6 +397,12 @@ class Executor:
 
         return records
 
+    def interact(self, sid: int) -> None:
+        """Hand the terminal to session ``sid`` interactively (in-process)."""
+        from .interactive import interactive_loop
+
+        interactive_loop(self.client, sid)
+
     def cleanup(self) -> None:
         """Stop sessions shellforge opened. Does not touch pre-existing ones."""
         for sid in sorted(self._owned_sessions):

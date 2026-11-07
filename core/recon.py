@@ -70,6 +70,7 @@ def run_recon(
     nmap_arguments: str = "-sV -Pn",
     timeout: int = 300,
     reports_dir: str | Path = "reports",
+    save_xml: bool = True,
 ) -> ReconResult:
     """Run an nmap service/version scan against ``target``.
 
@@ -101,15 +102,19 @@ def run_recon(
         finished_at=finished.isoformat(timespec="seconds"),
     )
 
-    # Persist raw XML for auditability.
-    reports_path = Path(reports_dir)
-    reports_path.mkdir(parents=True, exist_ok=True)
-    xml_file = reports_path / f"recon_{target.replace(':', '_')}_{started:%Y%m%d_%H%M%S}.xml"
-    try:
-        xml_file.write_text(scanner.get_nmap_last_output().decode("utf-8", "replace"))
-        result.raw_xml_path = str(xml_file)
-    except Exception as exc:  # noqa: BLE001 - XML dump is best-effort
-        logger.warning("Ham nmap XML yazılamadı: %s", exc)
+    # Persist raw XML for auditability (only when requested, e.g. --rapor).
+    if save_xml:
+        reports_path = Path(reports_dir)
+        reports_path.mkdir(parents=True, exist_ok=True)
+        xml_file = reports_path / f"recon_{target.replace(':', '_')}_{started:%Y%m%d_%H%M%S}.xml"
+        try:
+            raw = scanner.get_nmap_last_output()
+            if isinstance(raw, bytes):  # python-nmap version differences
+                raw = raw.decode("utf-8", "replace")
+            xml_file.write_text(raw)
+            result.raw_xml_path = str(xml_file)
+        except Exception as exc:  # noqa: BLE001 - XML dump is best-effort
+            logger.warning("Ham nmap XML yazılamadı: %s", exc)
 
     if target not in scanner.all_hosts():
         logger.warning("Hedef %s sonuç döndürmedi (kapalı ya da filtreli).", target)
