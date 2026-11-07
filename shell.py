@@ -60,12 +60,11 @@ def _print_banner() -> None:
 
 
 def _startup() -> None:
-    """Clear the screen, play a short loading spinner, greet, then clear again.
+    """Clear the screen, play a short loading bar, greet, then clear again.
 
     Skipped when stdout is not a real terminal (piped/redirected output), so
-    spinner characters never leak into logs or pipes.
+    nothing leaks into logs or pipes.
     """
-    import itertools
     import os
     import time
 
@@ -74,16 +73,22 @@ def _startup() -> None:
 
     clear = "cls" if os.name == "nt" else "clear"
     os.system(clear)
-    spinner = itertools.cycle("|/-\\")
-    sys.stdout.write(C.style("  Sistem aciliyor ", "bold", "white"))
-    sys.stdout.flush()
-    for _ in range(40):
-        sys.stdout.write(next(spinner))
+    print()
+    steps = 28
+    for i in range(steps + 1):
+        pct = int(i / steps * 100)
+        bar = "█" * i + "░" * (steps - i)
+        sys.stdout.write(
+            "\r"
+            + C.style("  Sistem yukleniyor  ", "bold", "white")
+            + C.style("[" + bar + "]", "ok")
+            + C.style(f" {pct:3d}%", "bold", "white")
+        )
         sys.stdout.flush()
-        time.sleep(0.12)
-        sys.stdout.write("\b")
-    print(C.style(" Hosgeldiniz", "bold", "ok") + "\n")
-    time.sleep(0.8)
+        time.sleep(0.06)
+    print("\n")
+    print(C.style("            >>>  HOSGELDINIZ  <<<", "bold", "ok"))
+    time.sleep(1.0)
     os.system(clear)
 
 
