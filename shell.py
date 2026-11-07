@@ -59,6 +59,34 @@ def _print_banner() -> None:
     print(C.dim("            yalnizca yetkili lab kullanimi\n"))
 
 
+def _startup() -> None:
+    """Clear the screen, play a short loading spinner, greet, then clear again.
+
+    Skipped when stdout is not a real terminal (piped/redirected output), so
+    spinner characters never leak into logs or pipes.
+    """
+    import itertools
+    import os
+    import time
+
+    if not sys.stdout.isatty():
+        return
+
+    clear = "cls" if os.name == "nt" else "clear"
+    os.system(clear)
+    spinner = itertools.cycle("|/-\\")
+    sys.stdout.write(C.style("  Sistem açılıyor ", "bold", "white"))
+    sys.stdout.flush()
+    for _ in range(40):
+        sys.stdout.write(next(spinner))
+        sys.stdout.flush()
+        time.sleep(0.12)
+        sys.stdout.write("\b")
+    print(C.style(" Hoşgeldiniz", "bold", "ok") + "\n")
+    time.sleep(0.8)
+    os.system(clear)
+
+
 def _section(title: str) -> None:
     """Print a bold, coloured section header to structure the output."""
     print("\n" + C.style(f"═══[ {title} ]" + "═" * max(4, 44 - len(title)), "bold", "cyan"))
@@ -260,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
         "gnome-terminal window instead of the current one.",
     )
     args = parser.parse_args(argv)
+
+    _startup()  # clear + loading animation + welcome (skipped if not a TTY)
 
     # Resolve the target: from --target if given (validated here), otherwise ask.
     if args.target:
