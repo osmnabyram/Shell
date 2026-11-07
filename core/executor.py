@@ -3,12 +3,12 @@
 Responsibilities:
 
 * Connect to a running ``msfrpcd`` (and fail with a clear, actionable message
-  if it is not reachable -- shellforge never starts services for you).
+  if it is not reachable -- ShellCracker never starts services for you).
 * For each candidate exploit: select a compatible reverse payload, optionally
   run ``check()`` as a dry-run, set up the reverse handler, fire once, and wait
   for a session.
 * Verify any session that lands by running a harmless command, capture proof,
-  and clean up sessions/jobs that shellforge itself started.
+  and clean up sessions/jobs that ShellCracker itself started.
 
 The executor only ever touches the single target address handed to it.
 """
@@ -25,7 +25,7 @@ from typing import Any
 
 from .matcher import ExploitCandidate
 
-logger = logging.getLogger("shellforge.executor")
+logger = logging.getLogger("ShellCracker.executor")
 
 
 class MsfConnectionError(RuntimeError):
@@ -86,7 +86,7 @@ def connect(
             start_cmd += " -S"  # -S disables SSL
         raise MsfConnectionError(
             f"msfrpcd'ye bağlanılamadı ({host}:{port}, ssl={ssl}): {exc}\n\n"
-            "shellforge Metasploit servislerini senin yerine başlatmaz. RPC "
+            "ShellCracker Metasploit servislerini senin yerine başlatmaz. RPC "
             "servisini başka bir terminalde başlat ve tekrar dene:\n\n"
             f"    {start_cmd}\n"
         ) from exc
@@ -248,7 +248,7 @@ class Executor:
         self.handler = config.get("handler", {})
         self.exec_cfg = config.get("execution", {})
         self.payload_prefs = config.get("payloads", {})
-        # Sessions shellforge opened, so Ctrl+C / cleanup only touches our own.
+        # Sessions ShellCracker opened, so Ctrl+C / cleanup only touches our own.
         self._owned_sessions: set[int] = set()
         self._next_lport = int(self.handler.get("lport_range", [4444, 4454])[0])
 
@@ -404,7 +404,7 @@ class Executor:
         interactive_loop(self.client, sid)
 
     def cleanup(self) -> None:
-        """Stop sessions shellforge opened. Does not touch pre-existing ones."""
+        """Stop sessions ShellCracker opened. Does not touch pre-existing ones."""
         for sid in sorted(self._owned_sessions):
             try:
                 self.client.sessions.session(sid).stop()

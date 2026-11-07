@@ -2,9 +2,9 @@
 
 Every run produces two artefacts under ``reports/``:
 
-* ``shellforge_<target>_<timestamp>.json`` -- machine-readable, the full record
+* ``ShellCracker_<target>_<timestamp>.json`` -- machine-readable, the full record
   of recon, matches and every attempt (parameters, check result, reason).
-* ``shellforge_<target>_<timestamp>.md``   -- human-readable summary.
+* ``ShellCracker_<target>_<timestamp>.md``   -- human-readable summary.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("shellforge.reporter")
+logger = logging.getLogger("ShellCracker.reporter")
 
 
 def build_report(
@@ -28,7 +28,7 @@ def build_report(
     """Assemble the full run record as a plain dict."""
     successful = [a for a in attempts if getattr(a, "success", False)]
     return {
-        "tool": "shellforge",
+        "tool": "ShellCracker",
         "target": target,
         "authorized_consent": consent,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -56,7 +56,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
         s["outcome"], s["outcome"]
     )
     lines = [
-        f"# shellforge raporu — {report['target']}",
+        f"# ShellCracker raporu — {report['target']}",
         "",
         f"- **Oluşturulma:** {report['generated_at']}",
         f"- **Kayıtlı yetki onayı:** {report['authorized_consent']}",
@@ -100,7 +100,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
     lines += [
         "---",
         "",
-        "_shellforge tarafından oluşturuldu. Yalnızca yetkili lab kullanımı._",
+        "_ShellCracker tarafından oluşturuldu. Yalnızca yetkili lab kullanımı._",
     ]
     return "\n".join(lines)
 
@@ -111,7 +111,7 @@ def write_reports(report: dict[str, Any], reports_dir: str | Path = "reports") -
     out.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_target = report["target"].replace(":", "_").replace("/", "_")
-    stem = f"shellforge_{safe_target}_{ts}"
+    stem = f"ShellCracker_{safe_target}_{ts}"
 
     json_path = out / f"{stem}.json"
     md_path = out / f"{stem}.md"

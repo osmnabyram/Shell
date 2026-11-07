@@ -1,8 +1,8 @@
-# shellforge
+# ShellCracker
 
 > Autonomous, single-target exploitation pipeline for **authorized lab use only**.
 
-shellforge chains reconnaissance, exploit matching, validation and firing into
+ShellCracker chains reconnaissance, exploit matching, validation and firing into
 one CLI run. Given a single target IP, it scans with nmap, matches discovered
 services against the Metasploit module database (and Exploit-DB for reference),
 validates candidates, fires them through a reverse handler until a session
@@ -16,7 +16,7 @@ develop exploit code of its own.
 
 ## ⚠️ Authorized lab use only
 
-shellforge is built for **your own virtual machines and sanctioned training
+ShellCracker is built for **your own virtual machines and sanctioned training
 environments** (Metasploitable, TryHackMe, Hack The Box, OSCP-style labs). Using
 it against systems you do not own or lack **explicit written permission** to test
 is illegal in most jurisdictions.
@@ -29,7 +29,7 @@ Tool-level safeguards:
   are authorized, and the answer is recorded in the log and report.
 - **No hardcoded targets** and **no internet-facing scan mode**.
 - **Clean interrupt.** `Ctrl+C` stops immediately and tears down only the
-  sessions shellforge itself opened.
+  sessions ShellCracker itself opened.
 
 You are solely responsible for having authorization.
 
@@ -68,8 +68,8 @@ Python packages are listed in [`requirements.txt`](requirements.txt).
 ## Installation
 
 ```bash
-git clone https://github.com/<you>/shellforge.git
-cd shellforge
+git clone https://github.com/osmnabyram/ShellCracker.git
+cd ShellCracker
 
 python3 -m venv venv
 source venv/bin/activate
@@ -80,10 +80,10 @@ cp config.yaml.example config.yaml
 
 The defaults work out of the box for a local lab — no editing required:
 
-- `handler.lhost` defaults to `auto`; shellforge detects your attacking IP
+- `handler.lhost` defaults to `auto`; ShellCracker detects your attacking IP
   from the route to the target. Override it only if the wrong interface is
   picked.
-- If `msfrpcd` is not already running, shellforge **starts it automatically**
+- If `msfrpcd` is not already running, ShellCracker **starts it automatically**
   using the user/password/port in `config.yaml` (default `msf` / `msf` /
   `55553`) and shuts it back down afterwards (kept alive if a session landed).
 
@@ -128,7 +128,7 @@ unreachable · `4` no shell obtained.
 ### Optional: start msfrpcd yourself
 
 Auto-start covers the common case. If you prefer to run the daemon manually
-(e.g. to watch its output), start it first and shellforge will reuse it:
+(e.g. to watch its output), start it first and ShellCracker will reuse it:
 
 ```bash
 msfrpcd -U msf -P msf -p 55553 -a 127.0.0.1
@@ -141,9 +141,9 @@ msfrpcd -U msf -P msf -p 55553 -a 127.0.0.1
 ```
 reports/
 ├── recon_<target>_<ts>.xml          # raw nmap XML
-├── shellforge_<target>_<ts>.log     # full run log
-├── shellforge_<target>_<ts>.json    # machine-readable record
-└── shellforge_<target>_<ts>.md      # human-readable summary
+├── ShellCracker_<target>_<ts>.log     # full run log
+├── ShellCracker_<target>_<ts>.json    # machine-readable record
+└── ShellCracker_<target>_<ts>.md      # human-readable summary
 ```
 
 ---

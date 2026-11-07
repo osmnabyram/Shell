@@ -2,7 +2,7 @@
 
 Provides a simple read/eval/print loop that forwards the user's typed commands
 to a shell or meterpreter session and prints the output back, until the user
-types ``exit`` (or sends EOF). Works both in-process (shellforge's default) and
+types ``exit`` (or sends EOF). Works both in-process (ShellCracker's default) and
 standalone (``attach.py`` launched in a separate terminal window).
 """
 

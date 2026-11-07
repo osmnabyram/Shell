@@ -24,7 +24,7 @@ from typing import Any, Iterable
 
 from .recon import Service
 
-logger = logging.getLogger("shellforge.matcher")
+logger = logging.getLogger("ShellCracker.matcher")
 
 # Metasploit exploit ranks ordered from most to least reliable. Used to sort
 # candidates so the executor tries the safest, highest-probability ones first.

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""shellforge -- autonomous lab-only exploitation pipeline.
+"""ShellCracker -- autonomous lab-only exploitation pipeline.
 
-Given a SINGLE target IP, shellforge runs recon -> match -> dry-run -> fire ->
+Given a SINGLE target IP, ShellCracker runs recon -> match -> dry-run -> fire ->
 verify, and on success drops the user straight into the obtained session.
 
-AUTHORIZED LAB USE ONLY. shellforge keeps this at the tool level:
+AUTHORIZED LAB USE ONLY. ShellCracker keeps this at the tool level:
 
 * exactly one IP address (no CIDR, ranges, lists or input files),
 * no hardcoded targets and no internet-facing scan mode,
@@ -27,7 +27,7 @@ from core import colors as C
 from core import executor as execmod
 from core import matcher, recon, reporter
 
-LOG = logging.getLogger("shellforge")
+LOG = logging.getLogger("ShellCracker")
 
 _ART = r"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⢤⣴⠾⠏⠙⠺⠭⠓⢋⡲⠳⠉⢿⠛⣓⠶⠤⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -55,7 +55,7 @@ _ART = r"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀
 def _print_banner() -> None:
     """Print the ASCII banner (coloured when the terminal supports it)."""
     print(C.style(_ART, "bold", "red"))
-    print(C.style("                 s h e l l f o r g e", "bold", "white"))
+    print(C.style("                 S H E L L C R A C K E R", "bold", "white"))
     print(C.dim("            yalnizca yetkili lab kullanimi\n"))
 
 
@@ -90,7 +90,7 @@ def setup_logging(target: str, reports_dir: Path, to_file: bool) -> Path | None:
     if to_file:
         reports_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logfile = reports_dir / f"shellforge_{target.replace(':', '_')}_{ts}.log"
+        logfile = reports_dir / f"ShellCracker_{target.replace(':', '_')}_{ts}.log"
         fh = logging.FileHandler(logfile, encoding="utf-8")
         fh.setFormatter(
             logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -114,7 +114,7 @@ def validate_single_ip(value: str) -> str:
         if bad in raw:
             raise argparse.ArgumentTypeError(
                 f"Tek bir IP adresi girilmeli; {label} girişi ('{raw}') kabul "
-                "edilmez. shellforge tek hedefli, yalnızca lab içindir."
+                "edilmez. ShellCracker tek hedefli, yalnızca lab içindir."
             )
     try:
         ip = ipaddress.ip_address(raw)
@@ -232,7 +232,7 @@ def _write_report(target, recon_result, matches, attempts, reports_dir) -> tuple
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="shellforge",
+        prog="ShellCracker",
         description="Autonomous lab-only exploitation pipeline (single target).",
         epilog="AUTHORIZED LAB USE ONLY. You are responsible for having permission.",
     )
@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         default=None,
         help="A single target IP address (no CIDR/range/list/file). "
-        "If omitted, shellforge asks for it interactively.",
+        "If omitted, ShellCracker asks for it interactively.",
     )
     parser.add_argument(
         "--config",
@@ -290,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         print(C.style("    LHOST: ", "bold") + C.style(detected, "bold", "ok") + C.dim("  (otomatik)"))
 
     the_executor: execmod.Executor | None = None
-    msf_proc = None  # msfrpcd process if shellforge started it
+    msf_proc = None  # msfrpcd process if ShellCracker started it
 
     def handle_sigint(signum, frame):  # noqa: ANN001 - signal handler signature
         LOG.warning("Ctrl+C alındı -- durduruluyor ve temizleniyor.")
@@ -408,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         print(C.info(f"[*] JSON rapor: {json_path}"))
         print(C.info(f"[*] MD rapor:   {md_path}"))
 
-    # If shellforge started msfrpcd: keep it alive when a session landed so the
+    # If ShellCracker started msfrpcd: keep it alive when a session landed so the
     # shell survives (per design); otherwise shut it back down.
     if msf_proc is not None:
         if succeeded:

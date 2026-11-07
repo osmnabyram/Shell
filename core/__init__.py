@@ -1,4 +1,4 @@
-"""shellforge core package.
+"""ShellCracker core package.
 
 Modules:
     recon       -- nmap service/version discovery and XML parsing

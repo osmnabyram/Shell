@@ -1,4 +1,4 @@
-# shellforge configuration (example values — safe defaults for a local lab)
+# ShellCracker configuration (example values — safe defaults for a local lab)
 # Copy to config.yaml and adjust for your lab network.
 
 msfrpc:
@@ -10,7 +10,7 @@ msfrpc:
 
 handler:
   # LHOST is YOUR attacking machine's IP on the lab network (the interface
-  # facing the target), NOT the target. Leave as "auto" to let shellforge
+  # facing the target), NOT the target. Leave as "auto" to let ShellCracker
   # detect it automatically from the route to the target; override with a
   # fixed IP only if auto-detection picks the wrong interface.
   lhost: auto

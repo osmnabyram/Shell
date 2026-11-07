@@ -15,7 +15,7 @@ from typing import Any
 
 import nmap
 
-logger = logging.getLogger("shellforge.recon")
+logger = logging.getLogger("ShellCracker.recon")
 
 
 @dataclass

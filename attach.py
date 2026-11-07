@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Standalone session attach for shellforge's --pencere flag.
+"""Standalone session attach for ShellCracker's --pencere flag.
 
 Connects to a running msfrpcd and hands the terminal to an existing session by
-ID. shellforge launches this in a new gnome-terminal window; it can also be run
+ID. ShellCracker launches this in a new gnome-terminal window; it can also be run
 manually to re-attach to a session later.
 
 Example:
