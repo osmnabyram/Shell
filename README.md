@@ -103,7 +103,6 @@ python3 shell.py
   Sistem aciliyor      Hosgeldiniz
 
                  S H E L L C R A C K E R
-            yalnizca yetkili lab kullanimi
 
 [?] Kurban IP (tek adres): 192.168.56.101
     Hedef: 192.168.56.101

@@ -55,16 +55,16 @@ _ART = r"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀
 def _print_banner() -> None:
     """Print the ASCII banner (coloured when the terminal supports it)."""
     print(C.style(_ART, "bold", "red"))
-    print(C.style("                 S H E L L C R A C K E R", "bold", "white"))
-    print(C.dim("            yalnizca yetkili lab kullanimi\n"))
+    print(C.style("                 S H E L L C R A C K E R\n", "bold", "white"))
 
 
 def _startup() -> None:
-    """Clear the screen, play a short loading bar, greet, then clear again.
+    """Clear the screen, run the loading spinner, greet, then clear again.
 
     Skipped when stdout is not a real terminal (piped/redirected output), so
     nothing leaks into logs or pipes.
     """
+    import itertools
     import os
     import time
 
@@ -73,22 +73,20 @@ def _startup() -> None:
 
     clear = "cls" if os.name == "nt" else "clear"
     os.system(clear)
-    print()
-    steps = 28
-    for i in range(steps + 1):
-        pct = int(i / steps * 100)
-        bar = "█" * i + "░" * (steps - i)
-        sys.stdout.write(
-            "\r"
-            + C.style("  Sistem yukleniyor  ", "bold", "white")
-            + C.style("[" + bar + "]", "ok")
-            + C.style(f" {pct:3d}%", "bold", "white")
-        )
+    spinner = itertools.cycle(["|", "/", "-", "\\"])
+    sys.stdout.write(C.style("Sistem aciliyor ", "white"))
+    sys.stdout.flush()
+
+    end_time = time.time() + 2.5
+    while time.time() < end_time:
+        sys.stdout.write(next(spinner))
         sys.stdout.flush()
-        time.sleep(0.06)
-    print("\n")
-    print(C.style("            >>>  HOSGELDINIZ  <<<", "bold", "ok"))
-    time.sleep(1.0)
+        time.sleep(0.12)
+        sys.stdout.write("\b")
+
+    sys.stdout.write(C.style(" Hosgeldiniz", "ok") + "\n")
+    sys.stdout.flush()
+    time.sleep(1)
     os.system(clear)
 
 
