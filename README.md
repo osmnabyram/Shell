@@ -100,13 +100,28 @@ python3 shell.py
 ```
 
 ```text
+  Sistem aciliyor      Hosgeldiniz
+
+                 S H E L L C R A C K E R
+            yalnizca yetkili lab kullanimi
+
 [?] Kurban IP (tek adres): 192.168.56.101
-[?] 192.168.56.101 sana ait VEYA test için YAZILI iznin olan bir lab mı? [e/H] e
-[*] LHOST otomatik belirlendi: 192.168.56.1
-[*] Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)...
-...
-[+] SHELL ALINDI! Oturum detayları ve kanıt için rapora bak.
+    Hedef: 192.168.56.101
+    LHOST: 192.168.56.1  (otomatik)
+
+═══[ KESIF ]═══ ...
+═══[ ESLESTIRME ]═══ ...
+═══[ SOMURU ]═══ ...
+
+  ╔══════════════════════════════════════╗
+  ║  SHELL ALINDI  —  oturum 1 (shell)
+  ╚══════════════════════════════════════╝
+[*] Oturum yeni pencerede acildi (gnome-terminal). Komutlarini orada yaz.
 ```
+
+On success the interactive shell opens in a **new terminal window** by
+default, so you can type commands inside the session there while this window
+finishes. Use `--ayni-pencere` to stay in the current window instead.
 
 You can also pass the target non-interactively:
 
@@ -120,7 +135,8 @@ Options:
 | --- | --- |
 | `--target <IP>` | Single target IP. CIDR/ranges/lists rejected. If omitted, you are prompted. |
 | `--config <path>` | Config file (default `config.yaml`). |
-| `--yes` | Pre-confirm the authorization prompt for unattended lab runs (still logged). |
+| `--rapor` | Write JSON + Markdown report, logfile and raw nmap XML to `reports/` (off by default). |
+| `--ayni-pencere` | Attach to the shell in THIS window instead of opening a new terminal (default is a new window). |
 
 Exit codes: `0` success/clean no-op · `1` cancelled or error · `3` msfrpc
 unreachable · `4` no shell obtained.

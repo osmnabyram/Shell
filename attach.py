@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except execmod.MsfConnectionError as exc:
         print(err(f"[!] {exc}"))
-        input("\nKapatmak için Enter'a bas...")  # keep the new window open to read the error
+        input("\nKapatmak icin Enter'a bas...")  # keep the new window open to read the error
         return 3
 
     interactive_loop(client, args.sid)

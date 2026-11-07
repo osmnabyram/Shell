@@ -89,7 +89,7 @@ def run_recon(
     """
     scanner = nmap.PortScanner()
     started = datetime.now()
-    logger.info("Keşif başlıyor: %s (parametre: %s)", target, nmap_arguments)
+    logger.info("Kesif basliyor: %s (parametre: %s)", target, nmap_arguments)
 
     # python-nmap already requests XML internally; we pass the service-scan
     # flags through the `arguments` parameter. -oX is handled by the library.
@@ -114,10 +114,10 @@ def run_recon(
             xml_file.write_text(raw)
             result.raw_xml_path = str(xml_file)
         except Exception as exc:  # noqa: BLE001 - XML dump is best-effort
-            logger.warning("Ham nmap XML yazılamadı: %s", exc)
+            logger.warning("Ham nmap XML yazilamadi: %s", exc)
 
     if target not in scanner.all_hosts():
-        logger.warning("Hedef %s sonuç döndürmedi (kapalı ya da filtreli).", target)
+        logger.warning("Hedef %s sonuc dondurmedi (kapali ya da filtreli).", target)
         return result
 
     host = scanner[target]
@@ -140,7 +140,7 @@ def run_recon(
             )
 
     logger.info(
-        "Keşif bitti: %s üzerinde %d açık servis",
+        "Kesif bitti: %s uzerinde %d acik servis",
         target,
         len(result.open_services()),
     )

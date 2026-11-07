@@ -105,7 +105,7 @@ def _search_terms(service: Service) -> list[str]:
 def _run_searchsploit(term: str) -> list[dict[str, Any]]:
     """Query searchsploit for ``term`` and return its JSON result list."""
     if not shutil.which("searchsploit"):
-        logger.warning("searchsploit PATH'te bulunamadı; Exploit-DB sorgusu atlanıyor.")
+        logger.warning("searchsploit PATH'te bulunamadi; Exploit-DB sorgusu atlaniyor.")
         return []
     try:
         proc = subprocess.run(
@@ -116,7 +116,7 @@ def _run_searchsploit(term: str) -> list[dict[str, Any]]:
             check=False,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.warning("searchsploit %r için başarısız: %s", term, exc)
+        logger.warning("searchsploit %r icin basarisiz: %s", term, exc)
         return []
 
     if not proc.stdout.strip():
@@ -141,7 +141,7 @@ def _search_msf(client: Any, term: str) -> list[dict[str, Any]]:
     try:
         results = client.modules.search(term)
     except Exception as exc:  # noqa: BLE001 - msfrpc errors are non-fatal here
-        logger.warning("msf modül araması %r için başarısız: %s", term, exc)
+        logger.warning("msf modul aramasi %r icin basarisiz: %s", term, exc)
         return []
     # Keep only exploit modules; payloads/aux/post are not directly fireable here.
     return [r for r in results if r.get("type") == "exploit"]
@@ -173,11 +173,11 @@ def match_services(
         matches = ServiceMatches(service=service)
         terms = _search_terms(service)
         if not terms:
-            logger.info("Port %s: eşleştirecek ürün/sürüm yok, atlanıyor.", service.port)
+            logger.info("Port %s: eslestirecek urun/surum yok, atlaniyor.", service.port)
             all_matches.append(matches)
             continue
 
-        logger.info("Port %s eşleştiriliyor (%s) — terimler: %s", service.port, service.banner, terms)
+        logger.info("Port %s eslestiriliyor (%s) — terimler: %s", service.port, service.banner, terms)
 
         seen_modules: set[str] = set()
         for term in terms:
@@ -206,7 +206,7 @@ def match_services(
         # Best (most reliable) exploits first.
         matches.msf_candidates.sort(key=lambda c: c.rank_score, reverse=True)
         logger.info(
-            "  -> %d MSF adayı, %d Exploit-DB eşleşmesi",
+            "  -> %d MSF adayi, %d Exploit-DB eslesmesi",
             len(matches.msf_candidates),
             len(matches.searchsploit_hits),
         )

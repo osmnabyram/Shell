@@ -50,11 +50,11 @@ def interactive_loop(client: Any, sid: int) -> None:
     try:
         session = client.sessions.session(sid)
     except Exception as exc:  # noqa: BLE001
-        print(err(f"[!] Oturum {sid} alınamadı: {exc}"))
+        print(err(f"[!] Oturum {sid} alinamadi: {exc}"))
         return
 
-    print(ok(f"\n[+] Oturum {sid} ({stype or '?'}) açıldı — interaktif moda geçiliyor."))
-    print(dim("    Çıkmak için 'exit' / 'çıkış' ya da Ctrl+D. Oturum arkada canlı kalır."))
+    print(ok(f"\n[+] Oturum {sid} ({stype or '?'}) acildi — interaktif moda geciliyor."))
+    print(dim("    Cikmak icin 'exit' / 'cikis' ya da Ctrl+D. Oturum arkada canli kalir."))
 
     is_meterpreter = stype == "meterpreter"
 
@@ -72,7 +72,7 @@ def interactive_loop(client: Any, sid: int) -> None:
             print()
             break
         stripped = cmd.strip()
-        if stripped in ("exit", "quit", "çıkış", "cikis"):
+        if stripped in ("exit", "quit", "cikis", "cikis"):
             break
         if not stripped:
             continue
@@ -85,6 +85,6 @@ def interactive_loop(client: Any, sid: int) -> None:
             if out:
                 print(out, end="" if out.endswith("\n") else "\n")
         except Exception as exc:  # noqa: BLE001 - keep the loop alive on errors
-            print(err(f"[!] Komut hatası: {exc}"))
+            print(err(f"[!] Komut hatasi: {exc}"))
 
-    print(warn("[*] İnteraktif moddan çıkıldı (oturum canlı bırakıldı)."))
+    print(warn("[*] Interaktif moddan cikildi (oturum canli birakildi)."))

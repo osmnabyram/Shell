@@ -52,23 +52,23 @@ def build_report(
 
 def _render_markdown(report: dict[str, Any]) -> str:
     s = report["summary"]
-    outcome_tr = {"shell": "shell alındı", "no-shell": "shell yok"}.get(
+    outcome_tr = {"shell": "shell alindi", "no-shell": "shell yok"}.get(
         s["outcome"], s["outcome"]
     )
     lines = [
         f"# ShellCracker raporu — {report['target']}",
         "",
-        f"- **Oluşturulma:** {report['generated_at']}",
-        f"- **Kayıtlı yetki onayı:** {report['authorized_consent']}",
-        f"- **Sonuç:** {outcome_tr}",
-        f"- **Açık servisler:** {s['open_services']}",
-        f"- **Değerlendirilen aday:** {s['candidates_considered']}",
-        f"- **Deneme sayısı:** {s['attempts']}",
-        f"- **Alınan oturum:** {s['sessions_obtained']}",
+        f"- **Olusturulma:** {report['generated_at']}",
+        f"- **Kayitli yetki onayi:** {report['authorized_consent']}",
+        f"- **Sonuc:** {outcome_tr}",
+        f"- **Acik servisler:** {s['open_services']}",
+        f"- **Degerlendirilen aday:** {s['candidates_considered']}",
+        f"- **Deneme sayisi:** {s['attempts']}",
+        f"- **Alinan oturum:** {s['sessions_obtained']}",
         "",
-        "## Açık servisler",
+        "## Acik servisler",
         "",
-        "| Port | Proto | Servis | Sürüm |",
+        "| Port | Proto | Servis | Surum |",
         "| ---- | ----- | ------ | ----- |",
     ]
     for svc in report["recon"]["services"]:
@@ -79,16 +79,16 @@ def _render_markdown(report: dict[str, Any]) -> str:
 
     lines += ["", "## Denemeler", ""]
     if not report["attempts"]:
-        lines.append("_Hiç exploit denemesi yapılmadı._")
+        lines.append("_Hic exploit denemesi yapilmadi._")
     for i, a in enumerate(report["attempts"], start=1):
-        status = "✅ BAŞARILI" if a["success"] else "❌ başarısız"
+        status = "✅ BASARILI" if a["success"] else "❌ basarisiz"
         lines += [
             f"### {i}. `exploit/{a['module']}` — {status}",
             "",
             f"- **Payload:** `{a['payload']}`",
             f"- **Parametreler:** `{a['parameters']}`",
             f"- **check():** {a['check_result']}",
-            f"- **Ateşlendi:** {a['fired']}",
+            f"- **Ateslendi:** {a['fired']}",
             f"- **Neden:** {a['reason']}",
         ]
         if a["session_id"] is not None:
@@ -100,7 +100,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
     lines += [
         "---",
         "",
-        "_ShellCracker tarafından oluşturuldu. Yalnızca yetkili lab kullanımı._",
+        "_ShellCracker tarafindan olusturuldu. Yalnizca yetkili lab kullanimi._",
     ]
     return "\n".join(lines)
 
@@ -119,5 +119,5 @@ def write_reports(report: dict[str, Any], reports_dir: str | Path = "reports") -
     json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False))
     md_path.write_text(_render_markdown(report))
 
-    logger.info("Raporlar yazıldı:\n  %s\n  %s", json_path, md_path)
+    logger.info("Raporlar yazildi:\n  %s\n  %s", json_path, md_path)
     return str(json_path), str(md_path)

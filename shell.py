@@ -75,14 +75,14 @@ def _startup() -> None:
     clear = "cls" if os.name == "nt" else "clear"
     os.system(clear)
     spinner = itertools.cycle("|/-\\")
-    sys.stdout.write(C.style("  Sistem açılıyor ", "bold", "white"))
+    sys.stdout.write(C.style("  Sistem aciliyor ", "bold", "white"))
     sys.stdout.flush()
     for _ in range(40):
         sys.stdout.write(next(spinner))
         sys.stdout.flush()
         time.sleep(0.12)
         sys.stdout.write("\b")
-    print(C.style(" Hoşgeldiniz", "bold", "ok") + "\n")
+    print(C.style(" Hosgeldiniz", "bold", "ok") + "\n")
     time.sleep(0.8)
     os.system(clear)
 
@@ -127,7 +127,7 @@ def setup_logging(target: str, reports_dir: Path, to_file: bool) -> Path | None:
 
     logging.basicConfig(level=logging.INFO, handlers=handlers)
     if logfile:
-        LOG.info("Günlük dosyası: %s", logfile)
+        LOG.info("Gunluk dosyasi: %s", logfile)
     return logfile
 
 
@@ -138,17 +138,17 @@ def validate_single_ip(value: str) -> str:
         argparse.ArgumentTypeError: On anything that is not a single IP.
     """
     raw = value.strip()
-    for bad, label in (("/", "CIDR"), (",", "liste"), (" ", "liste"), ("-", "aralık")):
+    for bad, label in (("/", "CIDR"), (",", "liste"), (" ", "liste"), ("-", "aralik")):
         if bad in raw:
             raise argparse.ArgumentTypeError(
-                f"Tek bir IP adresi girilmeli; {label} girişi ('{raw}') kabul "
-                "edilmez. ShellCracker tek hedefli, yalnızca lab içindir."
+                f"Tek bir IP adresi girilmeli; {label} girisi ('{raw}') kabul "
+                "edilmez. ShellCracker tek hedefli, yalnizca lab icindir."
             )
     try:
         ip = ipaddress.ip_address(raw)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"'{raw}' geçerli bir IP adresi değil: {exc}"
+            f"'{raw}' gecerli bir IP adresi degil: {exc}"
         ) from exc
     return str(ip)
 
@@ -164,7 +164,7 @@ def prompt_for_target() -> str | None:
         while True:
             raw = input(C.style("[?] Kurban IP (tek adres): ", "bold", "info")).strip()
             if not raw:
-                print(C.dim("    (Boş. Çıkmak için Ctrl+C.)"))
+                print(C.dim("    (Bos. Cikmak icin Ctrl+C.)"))
                 continue
             try:
                 return validate_single_ip(raw)
@@ -180,7 +180,7 @@ def load_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.exists():
         print(
-            C.err(f"[!] Yapılandırma dosyası '{p}' bulunamadı. Önce şablonu kopyala:")
+            C.err(f"[!] Yapilandirma dosyasi '{p}' bulunamadi. Once sablonu kopyala:")
             + f"\n      cp config.yaml.example {p}\n",
             file=sys.stderr,
         )
@@ -219,18 +219,16 @@ def _stop_proc(proc) -> None:
             pass
 
 
-def _launch_window_attach(msf_cfg: dict, sid: int) -> bool:
-    """Open a new gnome-terminal window that attaches to session ``sid``.
+def _launch_window_attach(msf_cfg: dict, sid: int) -> str | None:
+    """Open a new terminal window that attaches to session ``sid``.
 
-    Returns True if the window was launched, False if gnome-terminal is not
-    available (caller then falls back to in-process attach).
+    Tries the common terminal emulators in order. Returns the name of the
+    emulator that launched, or ``None`` if none is available (the caller then
+    falls back to an in-process attach in the current window).
     """
+    import shlex
     import shutil
     import subprocess
-
-    term = shutil.which("gnome-terminal")
-    if term is None:
-        return False
 
     script = Path(__file__).resolve().parent / "attach.py"
     cmd = [
@@ -243,11 +241,26 @@ def _launch_window_attach(msf_cfg: dict, sid: int) -> bool:
     ]
     if not bool(msf_cfg.get("ssl", True)):
         cmd.append("--no-ssl")
-    try:
-        subprocess.Popen([term, "--", *cmd])
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    cmd_str = shlex.join(cmd)
+
+    # Each emulator has its own argument convention for "run this command".
+    candidates = [
+        ["gnome-terminal", "--", *cmd],
+        ["qterminal", "-e", cmd_str],
+        ["xfce4-terminal", "-e", cmd_str],
+        ["konsole", "-e", *cmd],
+        ["xterm", "-e", *cmd],
+        ["x-terminal-emulator", "-e", *cmd],
+    ]
+    for argv in candidates:
+        if shutil.which(argv[0]) is None:
+            continue
+        try:
+            subprocess.Popen(argv)
+            return argv[0]
+        except Exception:  # noqa: BLE001 - try the next emulator
+            continue
+    return None
 
 
 def _write_report(target, recon_result, matches, attempts, reports_dir) -> tuple[str, str]:
@@ -282,10 +295,11 @@ def main(argv: list[str] | None = None) -> int:
         "Off by default.",
     )
     parser.add_argument(
-        "--pencere",
+        "--ayni-pencere",
+        dest="ayni_pencere",
         action="store_true",
-        help="On success, open the interactive session attach in a new "
-        "gnome-terminal window instead of the current one.",
+        help="On success, attach to the session in THIS window instead of "
+        "opening a new terminal window (the default).",
     )
     args = parser.parse_args(argv)
 
@@ -301,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         resolved = prompt_for_target()
         if resolved is None:
-            print(C.err("[!] Hedef girilmedi. Çıkılıyor."))
+            print(C.err("[!] Hedef girilmedi. Cikiliyor."))
             return 1
         args.target = resolved
 
@@ -323,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     msf_proc = None  # msfrpcd process if ShellCracker started it
 
     def handle_sigint(signum, frame):  # noqa: ANN001 - signal handler signature
-        LOG.warning("Ctrl+C alındı -- durduruluyor ve temizleniyor.")
+        LOG.warning("Ctrl+C alindi -- durduruluyor ve temizleniyor.")
         if the_executor is not None:
             the_executor.cleanup()
         if msf_proc is not None:
@@ -338,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         # --- 1. RECON -------------------------------------------------------
-        _section("KEŞİF")
+        _section("KESIF")
         recon_cfg = config.get("recon", {})
         recon_result = recon.run_recon(
             target=args.target,
@@ -349,15 +363,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         open_services = recon_result.open_services()
         if not open_services:
-            LOG.warning("Açık servis bulunamadı. Yapılacak bir şey yok.")
+            LOG.warning("Acik servis bulunamadi.")
             if args.rapor:
                 _write_report(args.target, recon_result, matches, attempts, reports_dir)
             return 0
 
         # --- 2. CONNECT (auto-start msfrpcd if needed) + MATCH -------------
-        _section("EŞLEŞTİRME")
+        _section("ESLESTIRME")
         msf_cfg = config.get("msfrpc", {})
-        LOG.info("Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)...")
+        LOG.info("Metasploit RPC'ye baglaniliyor (calismiyorsa otomatik baslatilir)...")
         client, msf_proc = execmod.connect_or_start(
             host=msf_cfg.get("host", "127.0.0.1"),
             port=int(msf_cfg.get("port", 55553)),
@@ -366,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
             ssl=bool(msf_cfg.get("ssl", True)),
         )
         if msf_proc is not None:
-            LOG.info("msfrpcd otomatik başlatıldı (PID %s).", msf_proc.pid)
+            LOG.info("msfrpcd otomatik baslatildi (PID %s).", msf_proc.pid)
 
         matches = matcher.match_services(
             open_services,
@@ -375,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         candidates = matcher.flatten_candidates(matches)
         if not candidates:
-            LOG.warning("Denenebilir Metasploit adayı bulunamadı.")
+            LOG.warning("Denenebilir Metasploit adayi bulunamadi.")
             if args.rapor:
                 _write_report(args.target, recon_result, matches, attempts, reports_dir)
             if msf_proc is not None:
@@ -385,11 +399,11 @@ def main(argv: list[str] | None = None) -> int:
         print(
             C.style("[*] ", "info")
             + C.style(str(len(candidates)), "bold", "info")
-            + C.info(" aday modül sıraya alındı (en güvenilir önce).")
+            + C.info(" aday modul siraya alindi (en guvenilir once).")
         )
 
         # --- 3-5. DRY-RUN + FIRE + VERIFY ----------------------------------
-        _section("SÖMÜRÜ")
+        _section("SOMURU")
         the_executor = execmod.Executor(client, args.target, config)
         attempts = the_executor.run(candidates)
 
@@ -404,16 +418,20 @@ def main(argv: list[str] | None = None) -> int:
                 + C.style(f"SHELL ALINDI  —  oturum {sid} ({success.session_type or '?'})", "bold", "ok")
             )
             print(C.style("  ╚══════════════════════════════════════╝", "bold", "ok"))
-            if args.pencere:
-                if _launch_window_attach(msf_cfg, sid):
-                    LOG.info("Oturum yeni bir gnome-terminal penceresinde açıldı.")
-                else:
-                    LOG.warning("gnome-terminal yok; bu pencerede bağlanılıyor.")
-                    the_executor.interact(sid)
-            else:
+            # Default: open the interactive shell in a NEW terminal window so
+            # the user can type commands inside the session there. Fall back to
+            # this window if no terminal emulator is available or --ayni-pencere.
+            if args.ayni_pencere:
                 the_executor.interact(sid)
+            else:
+                term = _launch_window_attach(msf_cfg, sid)
+                if term:
+                    LOG.info("Oturum yeni pencerede acildi (%s). Komutlarini orada yaz.", term)
+                else:
+                    LOG.warning("Terminal penceresi acilamadi; bu pencerede baglaniliyor.")
+                    the_executor.interact(sid)
         else:
-            print(C.style("\n  ✗ Shell alınamadı. Tüm adaylar denendi.", "bold", "warn"))
+            print(C.style("\n  ✗ Shell alinamadi. Tum adaylar denendi.", "bold", "warn"))
 
     except execmod.MsfConnectionError as exc:
         LOG.error("%s", exc)
@@ -442,11 +460,11 @@ def main(argv: list[str] | None = None) -> int:
     # shell survives (per design); otherwise shut it back down.
     if msf_proc is not None:
         if succeeded:
-            print(C.info(f"[*] msfrpcd açık bırakıldı (PID {msf_proc.pid}) — oturum canlı."))
-            print(C.dim(f"    Durdurmak için: kill {msf_proc.pid}"))
+            print(C.info(f"[*] msfrpcd acik birakildi (PID {msf_proc.pid}) — oturum canli."))
+            print(C.dim(f"    Durdurmak icin: kill {msf_proc.pid}"))
         else:
             _stop_proc(msf_proc)
-            LOG.info("Otomatik başlatılan msfrpcd kapatıldı.")
+            LOG.info("Otomatik baslatilan msfrpcd kapatildi.")
 
     return 0 if succeeded else 4
 
