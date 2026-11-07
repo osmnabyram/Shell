@@ -35,6 +35,39 @@ payloads:
 recon:
   nmap_arguments: "-sV -Pn"  # -oX is added automatically for XML parsing
   timeout: 300               # seconds
+  os_detection: false        # append -O for an OS-family guess (needs root)
+  default_scripts: false     # append -sC (nmap default NSE scripts)
+
+# Autonomous attack engine. The strategy builds a scored, phased plan from the
+# target profile and runs it adaptively (findings feed back into the plan).
+strategy:
+  # Phase order. Cheap/safe intel first, loud actions last. Remove a phase to
+  # skip it entirely (e.g. drop "credentials" to never try default logins).
+  phases: [enumerate, exploit, credentials, misconfig]
+  stop_on_first_shell: true  # stop the whole run once a session is verified
+
+  # Per-phase budgets (how many modules may run in each phase).
+  max_enum_modules: 14
+  max_exploit_attempts: 8
+  max_credential_attempts: 6
+  max_misconfig_attempts: 6
+  max_exploits_per_service: 6   # version-matched MSF exploits kept per service
+
+  # Scoring weights. score = category*cat + rank*rank + version_match*vm
+  #                          - noise_penalty*noise
+  weights:
+    category: 1.0
+    rank: 1.0
+    version_match: 1.0
+    noise_penalty: 1.0
+
+  # Default/weak-credential checks (lab only). These use MSF login scanners
+  # with BLANK_PASSWORDS + USER_AS_PASS plus the built-in small lists.
+  credentials:
+    enabled: true
+    stop_on_first_valid: true
+    extra_users: []          # added on top of the built-in user list
+    extra_passwords: []      # added on top of the built-in password list
 
 searchsploit:
   enabled: true              # include Exploit-DB matches in the report (informational)

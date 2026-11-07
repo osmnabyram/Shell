@@ -34,10 +34,13 @@ session. Instead of running `nmap`, `searchsploit` and Metasploit by hand and
 wiring a reverse handler each time, you give it one address and it drives those
 already-installed tools for you, logging each step along the way.
 
-It is a thin orchestration layer: it does **not** contain or develop exploit
-code of its own. Reconnaissance is delegated to `nmap`, candidate selection to
-the Metasploit module database and Exploit-DB, and every attempt runs through
-the Metasploit framework over `msfrpc`.
+It is an orchestration layer with a decision engine on top: it does **not**
+contain or develop exploit code of its own. Reconnaissance is delegated to
+`nmap`, exploit/auxiliary selection to the Metasploit module database and
+Exploit-DB, and every attempt runs through the Metasploit framework over
+`msfrpc`. What ShellCracker adds is the **autonomous strategy** — it profiles
+the target, builds a scored per-service attack plan, and adapts that plan to
+what it learns as it runs (see [Autonomous engine](#autonomous-engine)).
 
 - **Zero-setup run** — `msfrpcd` is started automatically if it is not already
   running, and `LHOST` is detected from the route to the target, so a basic run
@@ -56,15 +59,57 @@ the Metasploit framework over `msfrpc`.
 </div>
 
 1. **Target** — start from a single lab IP you own or are authorized to test.
-2. **Recon** — `nmap -sV -Pn` discovers open services and their versions.
-3. **Match** — services are mapped to ranked candidate exploits from the
-   Metasploit module database (with Exploit-DB hits for reference).
-4. **Fire** — each candidate is validated with a `check()` dry-run where
-   supported, then launched through `msfrpc` behind a reverse handler.
-5. **Shell** — a landed session is verified with a harmless command, then
+2. **Recon** — `nmap -sV -Pn` (optionally `-O`/`-sC`) discovers open services.
+3. **Profile** — recon is turned into a target model: an OS-family guess and
+   every service sorted into a category (web / smb / ftp / ssh / db / ...).
+4. **Strategy** — the autonomous brain walks a broad per-category decision tree
+   and builds a **scored, phased attack plan** covering every avenue it can see.
+5. **Execute** — the plan runs phase by phase and **adapts**: enumeration
+   findings feed back and reshape what gets fired next.
+6. **Shell** — a landed session is verified with a harmless command, then
    handed to you interactively in a new terminal window.
 
 Only a single explicitly provided IP is ever touched.
+
+---
+
+## Autonomous engine
+
+The point of ShellCracker is that it *reasons* about the target instead of
+running a fixed list. After recon, the [`profiler`](core/profiler.py) builds a
+`TargetProfile` and the [`strategy`](core/strategy.py) engine turns it into an
+`AttackPlan` of scored `AttackVector`s, grouped into four phases that run in
+order — cheap and safe first, loud and destructive last:
+
+| Phase | What it does | Example modules |
+|---|---|---|
+| **enumerate** | low-risk intel gathering; feeds the feedback loop | `smb_version`, `smb_ms17_010`, `ftp/anonymous`, `http_header`, `snmp_enum` |
+| **exploit** | version-matched MSF exploits, fired behind a reverse handler | whatever `modules.search` returns for each service, ranked |
+| **credentials** | default/weak-login checks (lab only, opt-out) | `ssh_login`, `smb_login`, `ftp_login`, `mysql_login` |
+| **misconfig** | abuse of exposed configuration | NFS exports, writable shares, anonymous access |
+
+**Scoring.** Within a phase, higher-scored vectors go first:
+
+```
+score = category_weight          (smb/ftp/web rank above dns/irc)
+      + rank_points               (MSF reliability: excellent … manual)
+      + version_match_points      (exact product+version in the module → +20)
+      - noise_penalty             (credential spraying scores lower)
+```
+
+All weights live under `strategy.weights` in the config.
+
+**Adaptive feedback.** This is what makes it autonomous. Enumeration findings
+are fed back into the engine, which boosts or injects vectors mid-run:
+
+- `smb_ms17_010` reports *vulnerable* → **EternalBlue** is injected at top score.
+- a valid SMB credential is found → a **psexec** vector is injected with it.
+- anonymous FTP / null SMB session / refined product banners → recorded as
+  facts and used to widen the plan.
+
+**Decision tree.** Each service category has its own playbook in
+[`strategy.py`](core/strategy.py) (`_plan_ftp`, `_plan_smb`, `_plan_web`,
+`_plan_mysql`, …), so adding a new technique is a localised change.
 
 ---
 
@@ -72,10 +117,12 @@ Only a single explicitly provided IP is ever touched.
 
 | Stage | What happens |
 |---|---|
-| Recon | `nmap -sV -Pn`, XML parsed into structured services |
-| Match | Metasploit module search + `searchsploit`, ranked by exploit reliability |
-| Dry-run | module `check()` where supported; targets reported safe are skipped |
-| Fire | compatible reverse payload selected, handler set up, candidates fired in order |
+| Recon | `nmap -sV -Pn` (+`-O`/`-sC` optional), XML parsed into structured services |
+| Profile | OS-family inference + per-category service grouping into a `TargetProfile` |
+| Strategy | per-category decision tree + MSF search → a scored, phased `AttackPlan` |
+| Enumerate | auxiliary scanners gather intel; findings feed back into the plan |
+| Exploit | compatible reverse payload selected, `check()` dry-run, fired by score |
+| Credentials | default/weak-login checks; a success can drop a session directly |
 | Verify | a harmless command confirms the session and captures proof |
 | Handoff | the interactive shell opens in a new terminal window |
 
@@ -105,9 +152,11 @@ Siber-ShellCracker/
 ├── shell.py              # entry: startup animation, banner, orchestration
 ├── attach.py             # standalone session attach (used by the new window)
 ├── core/
-│   ├── recon.py          # nmap service/version discovery + XML parsing
-│   ├── matcher.py        # services -> ranked candidate exploits
-│   ├── executor.py       # msfrpc: auto-start, check(), fire, verify, cleanup
+│   ├── recon.py          # nmap service/version (+optional -O/-sC) discovery
+│   ├── profiler.py       # recon -> TargetProfile (OS guess, categories, facts)
+│   ├── strategy.py       # the brain: profile -> scored, phased AttackPlan
+│   ├── matcher.py        # services -> ranked candidate exploits (MSF + EDB)
+│   ├── executor.py       # msfrpc: run exploit/aux/login vectors, adaptive loop
 │   ├── interactive.py    # interactive bridge to a live session
 │   ├── reporter.py       # JSON + Markdown report (optional)
 │   └── colors.py         # dependency-free ANSI colouring

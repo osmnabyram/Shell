@@ -60,6 +60,9 @@ class ReconResult:
     raw_xml_path: str | None = None
     started_at: str = ""
     finished_at: str = ""
+    # nmap OS-match list (only populated when the scan used -O); consumed by
+    # the profiler to guess the OS family.
+    os_matches: list[dict[str, Any]] = field(default_factory=list)
 
     def open_services(self) -> list[Service]:
         return [s for s in self.services if s.state == "open"]
@@ -121,6 +124,14 @@ def run_recon(
         return result
 
     host = scanner[target]
+    # Capture OS fingerprint matches when the scan requested them (-O).
+    try:
+        result.os_matches = list(host.get("osmatch", []) or [])
+        if result.os_matches:
+            logger.info("  OS tahmini: %s", result.os_matches[0].get("name", "?"))
+    except Exception as exc:  # noqa: BLE001 - osmatch is best-effort
+        logger.debug("osmatch okunamadi: %s", exc)
+
     for proto in host.all_protocols():
         for port in sorted(host[proto].keys()):
             info = host[proto][port]

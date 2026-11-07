@@ -24,17 +24,21 @@ def build_report(
     recon: Any,
     matches: list[Any],
     attempts: list[Any],
+    profile: Any = None,
+    plan: Any = None,
 ) -> dict[str, Any]:
     """Assemble the full run record as a plain dict."""
     successful = [a for a in attempts if getattr(a, "success", False)]
-    return {
+    report = {
         "tool": "ShellCracker",
         "target": target,
         "authorized_consent": consent,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "summary": {
             "open_services": len(recon.open_services()) if recon else 0,
+            "os_family": getattr(profile, "os_family", "unknown") if profile else "unknown",
             "candidates_considered": sum(len(m.msf_candidates) for m in matches),
+            "vectors_planned": len(plan.all()) if plan is not None else 0,
             "attempts": len(attempts),
             "sessions_obtained": len(successful),
             "outcome": "shell" if successful else "no-shell",
@@ -48,6 +52,11 @@ def build_report(
         "matches": [m.to_dict() for m in matches],
         "attempts": [a.to_dict() for a in attempts],
     }
+    if profile is not None:
+        report["profile"] = profile.to_dict()
+    if plan is not None:
+        report["plan"] = [v.to_dict() for v in plan.all()]
+    return report
 
 
 def _render_markdown(report: dict[str, Any]) -> str:
@@ -61,11 +70,49 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- **Olusturulma:** {report['generated_at']}",
         f"- **Kayitli yetki onayi:** {report['authorized_consent']}",
         f"- **Sonuc:** {outcome_tr}",
+        f"- **Tahmini OS:** {s.get('os_family', 'unknown')}",
         f"- **Acik servisler:** {s['open_services']}",
+        f"- **Planlanan vektor:** {s.get('vectors_planned', 0)}",
         f"- **Degerlendirilen aday:** {s['candidates_considered']}",
         f"- **Deneme sayisi:** {s['attempts']}",
         f"- **Alinan oturum:** {s['sessions_obtained']}",
         "",
+    ]
+
+    # Target profile (autonomous engine).
+    prof = report.get("profile")
+    if prof:
+        lines += [
+            "## Hedef profili",
+            "",
+            f"- **OS ailesi:** {prof['os_family']} "
+            f"(%{int(prof['os_confidence'] * 100)}, {prof['os_details']})",
+            f"- **Kategoriler:** "
+            + (", ".join(f"{c} ({len(p)})" for c, p in prof["categories"].items()) or "yok"),
+        ]
+        if prof.get("facts"):
+            lines.append(f"- **Bulgular:** `{prof['facts']}`")
+        for note in prof.get("notes", []):
+            lines.append(f"  - {note}")
+        lines.append("")
+
+    # Attack plan (scored decision tree).
+    plan = report.get("plan")
+    if plan:
+        lines += [
+            "## Saldiri plani (skorlu karar agaci)",
+            "",
+            "| Faz | Tur | Modul | Port | Skor | Gerekce |",
+            "| --- | --- | ----- | ---- | ---- | ------- |",
+        ]
+        for v in sorted(plan, key=lambda x: (x["phase"], -x["score"])):
+            lines.append(
+                f"| {v['phase']} | {v['kind']} | `{v['module']}` | {v['port']} | "
+                f"{v['score']} | {v['rationale']} |"
+            )
+        lines.append("")
+
+    lines += [
         "## Acik servisler",
         "",
         "| Port | Proto | Servis | Surum |",
@@ -82,15 +129,28 @@ def _render_markdown(report: dict[str, Any]) -> str:
         lines.append("_Hic exploit denemesi yapilmadi._")
     for i, a in enumerate(report["attempts"], start=1):
         status = "✅ BASARILI" if a["success"] else "❌ basarisiz"
+        kind = a.get("kind", "exploit")
+        prefix = "exploit" if kind == "exploit" else "auxiliary"
         lines += [
-            f"### {i}. `exploit/{a['module']}` — {status}",
+            f"### {i}. `{prefix}/{a['module']}` — {status}",
             "",
-            f"- **Payload:** `{a['payload']}`",
+            f"- **Faz / tur:** {a.get('phase', '?')} / {kind}"
+            + (f"  (skor {a.get('score', 0)})" if a.get("score") else ""),
+        ]
+        if a.get("rationale"):
+            lines.append(f"- **Gerekce:** {a['rationale']}")
+        if kind == "exploit":
+            lines += [
+                f"- **Payload:** `{a['payload']}`",
+                f"- **check():** {a['check_result']}",
+            ]
+        lines += [
             f"- **Parametreler:** `{a['parameters']}`",
-            f"- **check():** {a['check_result']}",
             f"- **Ateslendi:** {a['fired']}",
             f"- **Neden:** {a['reason']}",
         ]
+        if a.get("findings"):
+            lines.append(f"- **Bulgular:** {', '.join(a['findings'])}")
         if a["session_id"] is not None:
             lines.append(f"- **Oturum:** {a['session_id']} ({a['session_type']})")
         if a["proof"]:

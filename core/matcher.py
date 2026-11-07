@@ -215,6 +215,60 @@ def match_services(
     return all_matches
 
 
+def version_match_strength(module: str, service: Service) -> int:
+    """How specifically a module name/path matches a service fingerprint.
+
+    Returns 2 when the module path references the product *and* its version,
+    1 when it references only the product, 0 otherwise. The strategy scorer
+    uses this to prefer exploits written for the exact version seen.
+    """
+    mod = module.lower()
+    product = (service.product or service.name or "").lower().strip()
+    if not product:
+        return 0
+    # Compare against the leading token of the product ("vsftpd", "proftpd").
+    token = product.split()[0]
+    if token and token in mod:
+        version = (service.version or "").strip()
+        if version:
+            # Match "2.3.4" or a squashed "234" as module authors often write it.
+            squashed = version.replace(".", "")
+            if version in mod or (len(squashed) >= 2 and squashed in mod):
+                return 2
+        return 1
+    return 0
+
+
+def exploit_candidates_for_service(
+    service: Service, client: Any
+) -> list[ExploitCandidate]:
+    """Return MSF exploit candidates for ONE service, ranked, de-duplicated.
+
+    This is the per-service version of :func:`match_services`, used by the
+    strategy engine so it can attach version-match context to each candidate.
+    """
+    candidates: list[ExploitCandidate] = []
+    seen: set[str] = set()
+    for term in _search_terms(service):
+        for row in _search_msf(client, term):
+            module = (row.get("fullname") or row.get("name", "")).split("exploit/", 1)[-1]
+            if not module or module in seen:
+                continue
+            seen.add(module)
+            candidates.append(
+                ExploitCandidate(
+                    module=module,
+                    title=row.get("name") or row.get("fullname", module),
+                    rank=str(row.get("rank", "normal")),
+                    service_port=service.port,
+                    service_name=service.name,
+                    disclosure_date=str(row.get("disclosuredate", "")),
+                )
+            )
+    candidates.sort(key=lambda c: c.rank_score, reverse=True)
+    return candidates
+
+
 def flatten_candidates(matches: Iterable[ServiceMatches]) -> list[ExploitCandidate]:
     """Return all MSF candidates across services, globally ranked.
 
