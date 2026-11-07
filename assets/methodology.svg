@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 250" width="880" height="250" font-family="'Segoe UI', Roboto, Arial, sans-serif" role="img" aria-label="ShellCracker methodology: target, recon, match, fire, shell">
+  <style>
+    .bg    { fill:#0b0e14; }
+    .panel { fill:#0d1117; stroke:#20262e; stroke-width:1; }
+    .line  { stroke:#2a333f; stroke-width:3; fill:none; }
+    .prog  { stroke:#ff4d4d; stroke-width:3; fill:none; stroke-linecap:round;
+             stroke-dasharray:720; stroke-dashoffset:720; animation:draw 2.6s ease forwards; }
+    @keyframes draw { to { stroke-dashoffset:0; } }
+    .ring  { fill:#11161f; stroke:#ff4d4d; stroke-width:2.5; }
+    .ringg { fill:#0e1a12; stroke:#3fb950; stroke-width:2.5; }
+    .num   { fill:#e6edf3; font-size:19px; font-weight:700; }
+    .numg  { fill:#3fb950; font-size:19px; font-weight:700; }
+    .step  { fill:#e6edf3; font-size:14px; font-weight:700; letter-spacing:.5px; }
+    .stepg { fill:#3fb950; font-size:14px; font-weight:700; letter-spacing:.5px; }
+    .desc  { fill:#8b949e; font-size:10.5px; }
+    .head  { fill:#c9d1d9; font-size:13px; font-weight:700; letter-spacing:1px; }
+    .appear{ opacity:0; animation:ap .5s ease forwards; }
+    @keyframes ap { to { opacity:1; } }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="250" rx="14"/>
+  <rect class="panel" x="10" y="10" width="860" height="230" rx="12"/>
+  <text class="head" x="28" y="42">METHODOLOGY</text>
+
+  <!-- connector -->
+  <line class="line" x1="90" y1="104" x2="790" y2="104"/>
+  <path class="prog" d="M90 104 H790"/>
+
+  <!-- step 1 -->
+  <g class="appear" style="animation-delay:.2s">
+    <circle class="ring" cx="90" cy="104" r="26"/>
+    <text class="num" x="90" y="111" text-anchor="middle">1</text>
+    <text class="step" x="90" y="158" text-anchor="middle">TARGET</text>
+    <text class="desc" x="90" y="178" text-anchor="middle"><tspan x="90" dy="0">a lab IP you own</tspan><tspan x="90" dy="13">or are authorized</tspan><tspan x="90" dy="13">to test</tspan></text>
+  </g>
+
+  <!-- step 2 -->
+  <g class="appear" style="animation-delay:.7s">
+    <circle class="ring" cx="265" cy="104" r="26"/>
+    <text class="num" x="265" y="111" text-anchor="middle">2</text>
+    <text class="step" x="265" y="158" text-anchor="middle">RECON</text>
+    <text class="desc" x="265" y="178" text-anchor="middle"><tspan x="265" dy="0">nmap service and</tspan><tspan x="265" dy="13">version scan of</tspan><tspan x="265" dy="13">the host</tspan></text>
+  </g>
+
+  <!-- step 3 -->
+  <g class="appear" style="animation-delay:1.2s">
+    <circle class="ring" cx="440" cy="104" r="26"/>
+    <text class="num" x="440" y="111" text-anchor="middle">3</text>
+    <text class="step" x="440" y="158" text-anchor="middle">MATCH</text>
+    <text class="desc" x="440" y="178" text-anchor="middle"><tspan x="440" dy="0">rank candidate</tspan><tspan x="440" dy="13">exploits from MSF</tspan><tspan x="440" dy="13">and Exploit-DB</tspan></text>
+  </g>
+
+  <!-- step 4 -->
+  <g class="appear" style="animation-delay:1.7s">
+    <circle class="ring" cx="615" cy="104" r="26"/>
+    <text class="num" x="615" y="111" text-anchor="middle">4</text>
+    <text class="step" x="615" y="158" text-anchor="middle">FIRE</text>
+    <text class="desc" x="615" y="178" text-anchor="middle"><tspan x="615" dy="0">dry-run check(),</tspan><tspan x="615" dy="13">then launch via</tspan><tspan x="615" dy="13">msfrpc</tspan></text>
+  </g>
+
+  <!-- step 5 -->
+  <g class="appear" style="animation-delay:2.2s">
+    <circle class="ringg" cx="790" cy="104" r="26"/>
+    <text class="numg" x="790" y="111" text-anchor="middle">5</text>
+    <text class="stepg" x="790" y="158" text-anchor="middle">SHELL</text>
+    <text class="desc" x="790" y="178" text-anchor="middle"><tspan x="790" dy="0">verified session,</tspan><tspan x="790" dy="13">handed to you in</tspan><tspan x="790" dy="13">a new terminal</tspan></text>
+  </g>
+</svg>

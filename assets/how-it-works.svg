@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 236" width="880" height="236" font-family="'Segoe UI', Roboto, Arial, sans-serif" role="img" aria-label="ShellCracker pipeline: target, recon, match, fire, shell">
+  <style>
+    .bg    { fill:#0b0e14; }
+    .panel { fill:#0d1117; stroke:#20262e; stroke-width:1; }
+    .node  { fill:#11161f; stroke:#2a333f; stroke-width:1.5; }
+    .shell { fill:#0e1a12; stroke:#2ea043; stroke-width:1.8; }
+    .lbl   { fill:#e6edf3; font-size:15px; font-weight:700; letter-spacing:.5px; }
+    .lblg  { fill:#3fb950; font-size:15px; font-weight:700; letter-spacing:.5px; }
+    .sub   { fill:#8b949e; font-size:10.5px; }
+    .bar   { fill:#ff4d4d; }
+    .barg  { fill:#3fb950; }
+    .tt    { fill:#6e7681; font-size:11px; letter-spacing:2px; }
+    .flow  { stroke:#ff4d4d; stroke-width:2.6; fill:none; stroke-linecap:round;
+             stroke-dasharray:5 9; animation:dash 1.05s linear infinite; }
+    .head  { fill:#c9d1d9; font-size:13px; font-weight:700; letter-spacing:1px; }
+    @keyframes dash { to { stroke-dashoffset:-28; } }
+    .appear { opacity:0; animation:appear .55s ease forwards; }
+    @keyframes appear { to { opacity:1; } }
+    .glow { animation:glow 1.7s ease-in-out infinite; transform-origin:center; }
+    @keyframes glow { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="236" rx="14"/>
+  <rect class="panel" x="10" y="10" width="860" height="216" rx="12"/>
+
+  <text class="head" x="28" y="40">SHELLCRACKER</text>
+  <text class="tt"   x="160" y="40">AUTONOMOUS  ·  SINGLE TARGET  ·  LAB ONLY</text>
+
+  <!-- flow lines (drawn first, behind nodes) -->
+  <path class="flow" d="M150 128 H195"/>
+  <path class="flow" d="M325 128 H370"/>
+  <path class="flow" d="M500 128 H545"/>
+  <path class="flow" d="M675 128 H720"/>
+
+  <!-- node 1: TARGET -->
+  <g class="appear" style="animation-delay:0s">
+    <rect class="node" x="20" y="88" width="130" height="80" rx="10"/>
+    <rect class="bar"  x="20" y="88" width="130" height="4" rx="2"/>
+    <text class="lbl" x="85" y="126" text-anchor="middle">TARGET</text>
+    <text class="sub" x="85" y="146" text-anchor="middle">single IP</text>
+  </g>
+
+  <!-- node 2: RECON -->
+  <g class="appear" style="animation-delay:.3s">
+    <rect class="node" x="195" y="88" width="130" height="80" rx="10"/>
+    <rect class="bar"  x="195" y="88" width="130" height="4" rx="2"/>
+    <text class="lbl" x="260" y="126" text-anchor="middle">RECON</text>
+    <text class="sub" x="260" y="146" text-anchor="middle">nmap -sV</text>
+  </g>
+
+  <!-- node 3: MATCH -->
+  <g class="appear" style="animation-delay:.6s">
+    <rect class="node" x="370" y="88" width="130" height="80" rx="10"/>
+    <rect class="bar"  x="370" y="88" width="130" height="4" rx="2"/>
+    <text class="lbl" x="435" y="126" text-anchor="middle">MATCH</text>
+    <text class="sub" x="435" y="146" text-anchor="middle">MSF + searchsploit</text>
+  </g>
+
+  <!-- node 4: FIRE -->
+  <g class="appear" style="animation-delay:.9s">
+    <rect class="node" x="545" y="88" width="130" height="80" rx="10"/>
+    <rect class="bar"  x="545" y="88" width="130" height="4" rx="2"/>
+    <text class="lbl" x="610" y="126" text-anchor="middle">FIRE</text>
+    <text class="sub" x="610" y="146" text-anchor="middle">check() + msfrpc</text>
+  </g>
+
+  <!-- node 5: SHELL -->
+  <g class="appear glow" style="animation-delay:1.2s">
+    <rect class="shell" x="720" y="88" width="130" height="80" rx="10"/>
+    <rect class="barg"  x="720" y="88" width="130" height="4" rx="2"/>
+    <text class="lblg" x="785" y="126" text-anchor="middle">SHELL</text>
+    <text class="sub"  x="785" y="146" text-anchor="middle">new terminal</text>
+  </g>
+
+  <text class="tt" x="440" y="202" text-anchor="middle" style="letter-spacing:1px">recon → match → dry-run → fire → verified session</text>
+</svg>
