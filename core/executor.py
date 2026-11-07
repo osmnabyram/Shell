@@ -60,6 +60,7 @@ class AttemptRecord:
     rationale: str = ""
     findings: list[str] = field(default_factory=list)
     output: str = ""
+    postexp: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         # Drop internal attributes (e.g. the raw Finding objects cached for the
@@ -660,12 +661,30 @@ class Executor:
 
                 if record.success:
                     logger.info("Oturum alindi (%s fazi).", phase)
+                    self._post_exploit(record, engine)
                     if stop_on_shell:
                         return records
                 if spent < budgets.get(phase, 6) and plan.pending(phase):
                     time.sleep(delay)
 
         return records
+
+    def _post_exploit(self, record: AttemptRecord, engine: StrategyEngine) -> None:
+        """Run the automated post-exploitation triage on a verified session."""
+        if not self.config.get("post_exploitation", {}).get("enabled", True):
+            return
+        if record.session_id is None:
+            return
+        try:
+            from .postexp import PostExploiter
+
+            pe = PostExploiter(self.client, self.config).run(
+                record.session_id, record.session_type, engine.profile
+            )
+            record.postexp = pe.to_dict()
+            logger.info("Post-exploitation: %s", pe.summary())
+        except Exception as exc:  # noqa: BLE001 - post-exp must never break the run
+            logger.warning("Post-exploitation atlandi: %s", exc)
 
     def interact(self, sid: int) -> None:
         """Hand the terminal to session ``sid`` interactively (in-process)."""

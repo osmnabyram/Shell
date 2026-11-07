@@ -17,9 +17,11 @@ session lands, verifies that session, and hands you an interactive shell.
 
 </div>
 
-<!-- Optional: drop a terminal screenshot here, e.g.
-<div align="center"><img width="1600" alt="ShellCracker interface" src="PASTE_SCREENSHOT_URL" /></div>
--->
+<div align="center">
+<img width="515" alt="ShellCracker arayuzu: ASCII beyin banner'i ve tek hedef IP istemi." src="assets/interface.png" />
+<br/>
+<sub>Acilis arayuzu — banner ve tek-hedef IP istemi.</sub>
+</div>
 
 ---
 
@@ -62,12 +64,17 @@ what it learns as it runs (see [Autonomous engine](#autonomous-engine)).
 2. **Recon** — `nmap -sV -Pn` (optionally `-O`/`-sC`) discovers open services.
 3. **Profile** — recon is turned into a target model: an OS-family guess and
    every service sorted into a category (web / smb / ftp / ssh / db / ...).
-4. **Strategy** — the autonomous brain walks a broad per-category decision tree
-   and builds a **scored, phased attack plan** covering every avenue it can see.
-5. **Execute** — the plan runs phase by phase and **adapts**: enumeration
-   findings feed back and reshape what gets fired next.
-6. **Shell** — a landed session is verified with a harmless command, then
-   handed to you interactively in a new terminal window.
+4. **Vulnerability analysis** — each service is matched against a curated
+   knowledge base of high-signal exploits *and* the live Metasploit module DB.
+5. **Strategy** — the brain walks a broad per-category decision tree and builds
+   a **scored, phased attack plan** covering every avenue it can see.
+6. **Execute** — the plan runs phase by phase and **adapts**: enumeration
+   findings feed back and reshape what gets fired next; discovered credentials
+   are reused across every other service.
+7. **Post-exploitation** — a landed session is triaged automatically: who am I,
+   am I privileged, privilege-escalation paths, and low-risk loot.
+8. **Shell** — the verified session is handed to you interactively in a new
+   terminal window, already triaged.
 
 Only a single explicitly provided IP is ever touched.
 
@@ -78,38 +85,74 @@ Only a single explicitly provided IP is ever touched.
 The point of ShellCracker is that it *reasons* about the target instead of
 running a fixed list. After recon, the [`profiler`](core/profiler.py) builds a
 `TargetProfile` and the [`strategy`](core/strategy.py) engine turns it into an
-`AttackPlan` of scored `AttackVector`s, grouped into four phases that run in
-order — cheap and safe first, loud and destructive last:
+`AttackPlan` of scored `AttackVector`s, grouped into phases that run in order —
+cheap and safe first, loud and destructive last — then the executor runs them
+adaptively and, on success, hands off to [`postexp`](core/postexp.py).
+
+### Phases
 
 | Phase | What it does | Example modules |
 |---|---|---|
-| **enumerate** | low-risk intel gathering; feeds the feedback loop | `smb_version`, `smb_ms17_010`, `ftp/anonymous`, `http_header`, `snmp_enum` |
-| **exploit** | version-matched MSF exploits, fired behind a reverse handler | whatever `modules.search` returns for each service, ranked |
-| **credentials** | default/weak-login checks (lab only, opt-out) | `ssh_login`, `smb_login`, `ftp_login`, `mysql_login` |
+| **enumerate** | low-risk intel gathering; feeds the feedback loop | `smb_version`, `smb_ms17_010`, `ftp/anonymous`, `http_header`, `smtp_enum`, `snmp_enum`, `nfsmount` |
+| **exploit** | knowledge-base + version-matched MSF exploits, behind a reverse handler | `vsftpd_234_backdoor`, `ms17_010_eternalblue`, `samba/usermap_script`, plus whatever `modules.search` returns |
+| **credentials** | default/weak-login checks, then credential **reuse** across services | `ssh_login`, `smb_login`, `ftp_login`, `mysql_login`, `vnc_login` |
 | **misconfig** | abuse of exposed configuration | NFS exports, writable shares, anonymous access |
+| **post-exploitation** | automatic triage of every landed session | `local_exploit_suggester`, `getsystem`, `sudo -l`, SUID sweep, `hashdump` |
 
-**Scoring.** Within a phase, higher-scored vectors go first:
+### Three sources of attacks
+
+For every service the engine draws candidates from three places, so it never
+depends on a single heuristic:
+
+1. **Per-category playbook** — a declarative decision tree (`_PLAYBOOK` in
+   [`strategy.py`](core/strategy.py)): the enumeration + login modules that make
+   sense for each category (ftp, ssh, smb, web, mysql, mssql, postgres, oracle,
+   redis, mongodb, rpc/nfs, snmp, smtp, pop3, rdp, vnc, finger, r-services,
+   irc, java-rmi, …). Adding a technique is a one-line change.
+2. **Knowledge base of high-signal exploits** (`_KNOWN_EXPLOITS`) — curated
+   fingerprint → exploit rules for the classics (vsftpd 2.3.4, ProFTPD 1.3.3c,
+   UnrealIRCd, Samba `usermap_script`, distcc, Java-RMI, Shellshock, PHP-CGI,
+   Drupalgeddon2, EternalBlue, MS08-067, …). These are injected directly and
+   get a *killer bonus* so they outrank noisy search hits.
+3. **Version-matched MSF net** — `modules.search` per service, ranked by MSF
+   reliability and by how specifically the module matches the detected version.
+
+### Scoring
+
+Within a phase, higher-scored vectors go first:
 
 ```
-score = category_weight          (smb/ftp/web rank above dns/irc)
+score = category_weight          (smb/ftp/web rank above dns/finger)
       + rank_points               (MSF reliability: excellent … manual)
       + version_match_points      (exact product+version in the module → +20)
+      + killer_bonus              (curated knowledge-base exploits)
       - noise_penalty             (credential spraying scores lower)
 ```
 
 All weights live under `strategy.weights` in the config.
 
-**Adaptive feedback.** This is what makes it autonomous. Enumeration findings
-are fed back into the engine, which boosts or injects vectors mid-run:
+### Adaptive feedback
 
-- `smb_ms17_010` reports *vulnerable* → **EternalBlue** is injected at top score.
-- a valid SMB credential is found → a **psexec** vector is injected with it.
-- anonymous FTP / null SMB session / refined product banners → recorded as
-  facts and used to widen the plan.
+This is what makes it autonomous — enumeration findings are fed back into the
+engine, which boosts or injects vectors mid-run:
 
-**Decision tree.** Each service category has its own playbook in
-[`strategy.py`](core/strategy.py) (`_plan_ftp`, `_plan_smb`, `_plan_web`,
-`_plan_mysql`, …), so adding a new technique is a localised change.
+- `smb_ms17_010` reports *vulnerable* → **EternalBlue** is promoted to top score.
+- a valid credential is found → it is **reused** against every other login
+  service, and credential-gated exploits (**psexec**, Tomcat Manager upload,
+  Postgres/MySQL payload) are unlocked for it.
+- anonymous FTP / null SMB session / NFS exports / refined product banners →
+  recorded as facts and used to widen the plan.
+
+### Post-exploitation
+
+When a session is verified the [`postexp`](core/postexp.py) module triages it
+automatically before handing you a shell: it identifies the user and privilege
+level, then on meterpreter runs `getsystem` + `local_exploit_suggester`, and on
+a shell enumerates the Linux privesc surface (`sudo -l`, SUID/GTFOBins sweep,
+kernel version, cron) and suggests concrete escalation paths. Loot is read-only
+and proportionate (`/etc/passwd`, or `/etc/shadow` + `hashdump` only once
+privileged). Firing crash-prone exploits or live kernel privesc stays gated
+behind `strategy.allow_dangerous`.
 
 ---
 
@@ -121,9 +164,10 @@ are fed back into the engine, which boosts or injects vectors mid-run:
 | Profile | OS-family inference + per-category service grouping into a `TargetProfile` |
 | Strategy | per-category decision tree + MSF search → a scored, phased `AttackPlan` |
 | Enumerate | auxiliary scanners gather intel; findings feed back into the plan |
-| Exploit | compatible reverse payload selected, `check()` dry-run, fired by score |
-| Credentials | default/weak-login checks; a success can drop a session directly |
+| Exploit | knowledge-base + version-matched modules, `check()` dry-run, fired by score |
+| Credentials | default/weak-login checks + reuse; a success can drop a session directly |
 | Verify | a harmless command confirms the session and captures proof |
+| Post-exp | automatic triage: whoami, privilege check, privesc suggestions, loot |
 | Handoff | the interactive shell opens in a new terminal window |
 
 ---
@@ -157,6 +201,7 @@ Siber-ShellCracker/
 │   ├── strategy.py       # the brain: profile -> scored, phased AttackPlan
 │   ├── matcher.py        # services -> ranked candidate exploits (MSF + EDB)
 │   ├── executor.py       # msfrpc: run exploit/aux/login vectors, adaptive loop
+│   ├── postexp.py        # post-exploitation: whoami, privesc, loot after a shell
 │   ├── interactive.py    # interactive bridge to a live session
 │   ├── reporter.py       # JSON + Markdown report (optional)
 │   └── colors.py         # dependency-free ANSI colouring

@@ -45,6 +45,7 @@ strategy:
   # skip it entirely (e.g. drop "credentials" to never try default logins).
   phases: [enumerate, exploit, credentials, misconfig]
   stop_on_first_shell: true  # stop the whole run once a session is verified
+  allow_dangerous: false     # allow crash-prone exploits (BlueKeep, etc.) + live privesc
 
   # Per-phase budgets (how many modules may run in each phase).
   max_enum_modules: 14
@@ -68,6 +69,16 @@ strategy:
     stop_on_first_valid: true
     extra_users: []          # added on top of the built-in user list
     extra_passwords: []      # added on top of the built-in password list
+
+# Post-exploitation triage, run automatically once a session is verified.
+# Conservative by default: it enumerates and suggests, it does not fire local
+# exploits unless auto_escalate + strategy.allow_dangerous are both on.
+post_exploitation:
+  enabled: true
+  loot: true                 # read /etc/passwd (or /etc/shadow + hashdump if root)
+  privesc_suggester: true    # run post/multi/recon/local_exploit_suggester (meterpreter)
+  auto_escalate: true        # meterpreter getsystem; live kernel exploits still need
+                             # strategy.allow_dangerous=true
 
 searchsploit:
   enabled: true              # include Exploit-DB matches in the report (informational)

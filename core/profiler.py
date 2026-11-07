@@ -44,11 +44,18 @@ _CATEGORY_NAMES: dict[str, set[str]] = {
     "mongodb": {"mongodb", "mongod"},
     "redis": {"redis"},
     "rpc": {"rpcbind", "nfs", "msrpc", "mountd", "nlockmgr", "nfs_acl"},
-    "mail": {"smtp", "smtps", "pop3", "pop3s", "imap", "imaps"},
+    "smtp": {"smtp", "smtps", "submission"},
+    "pop3": {"pop3", "pop3s"},
+    "imap": {"imap", "imaps"},
     "dns": {"domain", "dns"},
     "snmp": {"snmp", "snmptrap"},
     "vnc": {"vnc", "vnc-http"},
-    "irc": {"irc", "ircs", "ircu"},
+    "irc": {"irc", "ircs", "ircu", "ircd"},
+    "finger": {"finger"},
+    "rservices": {"exec", "login", "shell", "rexec", "rlogin", "rsh"},
+    "java-rmi": {"java-rmi", "rmiregistry"},
+    "ajp": {"ajp13", "ajp"},
+    "distcc": {"distccd", "distcc"},
 }
 # Fallback: keyword in product/extrainfo -> category, when the service name is
 # generic (e.g. "tcpwrapped" or an unrecognised banner).
@@ -62,10 +69,12 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 # Service categories most likely to hand over a shell / high-value foothold get
 # a higher base weight; purely informational ones get less. Used by the scorer.
 CATEGORY_WEIGHT: dict[str, int] = {
-    "smb": 26, "ftp": 24, "web": 22, "telnet": 21, "mysql": 20, "mssql": 20,
-    "postgres": 20, "rdp": 20, "vnc": 20, "ssh": 18, "redis": 19, "mongodb": 18,
-    "oracle": 18, "rpc": 16, "snmp": 16, "mail": 12, "dns": 8, "irc": 10,
-    "database": 18, "other": 8,
+    "smb": 26, "ftp": 24, "web": 22, "telnet": 21, "rservices": 22,
+    "mysql": 20, "mssql": 20, "postgres": 20, "rdp": 20, "vnc": 20,
+    "java-rmi": 22, "irc": 20, "distcc": 22, "ajp": 18,
+    "ssh": 18, "redis": 19, "mongodb": 18, "oracle": 18,
+    "rpc": 16, "snmp": 16, "smtp": 14, "pop3": 12, "imap": 12,
+    "finger": 12, "dns": 8, "database": 18, "other": 8,
 }
 
 # --- OS inference signals ---------------------------------------------------

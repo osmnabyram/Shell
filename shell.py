@@ -458,6 +458,24 @@ def main(argv: list[str] | None = None) -> int:
                 + C.style(f"SHELL ALINDI  —  oturum {sid} ({success.session_type or '?'})", "bold", "ok")
             )
             print(C.style("  ╚══════════════════════════════════════╝", "bold", "ok"))
+
+            # Post-exploitation triage summary (gathered automatically).
+            pe = getattr(success, "postexp", None) or {}
+            if pe:
+                who = (pe.get("whoami") or "?").splitlines()[0] if pe.get("whoami") else "?"
+                priv = "ROOT/SYSTEM" if pe.get("is_privileged") else "sinirli yetki"
+                tag = "ok" if pe.get("is_privileged") else "warn"
+                print(C.style("    Kullanici: ", "bold") + C.style(who, "bold", tag)
+                      + C.dim(f"  ({priv})"))
+                if pe.get("escalated"):
+                    print(C.style("    Yetki: ", "bold") + C.ok("getsystem ile yukseltildi"))
+                for sug in (pe.get("privesc_suggestions") or [])[:5]:
+                    print(C.info("    privesc → ") + C.dim(sug))
+                loot = [k for k, v in (pe.get("loot") or {}).items()
+                        if v and not str(v).startswith("[hata")]
+                if loot:
+                    print(C.style("    Toplanan: ", "bold") + C.dim(", ".join(loot)))
+
             # Default: open the interactive shell in a NEW terminal window so
             # the user can type commands inside the session there. Fall back to
             # this window if no terminal emulator is available or --ayni-pencere.

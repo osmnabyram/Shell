@@ -155,6 +155,24 @@ def _render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- **Oturum:** {a['session_id']} ({a['session_type']})")
         if a["proof"]:
             lines += ["", "```", a["proof"], "```"]
+        pe = a.get("postexp") or {}
+        if pe:
+            lines += [
+                "",
+                "#### Post-exploitation",
+                f"- **Kullanici:** `{pe.get('whoami', '').splitlines()[0] if pe.get('whoami') else '?'}`"
+                + ("  — **ROOT/SYSTEM**" if pe.get("is_privileged") else "  — sinirli"),
+            ]
+            if pe.get("escalated"):
+                lines.append("- **Yetki yukseltme:** basarili (getsystem)")
+            if pe.get("privesc_suggestions"):
+                lines.append("- **Privesc onerileri:**")
+                for sug in pe["privesc_suggestions"][:8]:
+                    lines.append(f"  - {sug}")
+            if pe.get("loot"):
+                shown = [k for k, v in pe["loot"].items() if v and not v.startswith("[hata")]
+                if shown:
+                    lines.append(f"- **Toplanan:** {', '.join(shown)}")
         lines.append("")
 
     lines += [
