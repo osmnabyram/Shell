@@ -96,7 +96,7 @@ The defaults work out of the box for a local lab — no editing required:
 Just run it and enter the target when asked:
 
 ```bash
-python3 shellforge.py
+python3 shell.py
 ```
 
 ```text
@@ -111,7 +111,7 @@ python3 shellforge.py
 You can also pass the target non-interactively:
 
 ```bash
-python3 shellforge.py --target 192.168.56.101
+python3 shell.py --target 192.168.56.101
 ```
 
 Options:

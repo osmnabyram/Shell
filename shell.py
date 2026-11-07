@@ -23,43 +23,67 @@ from pathlib import Path
 
 import yaml
 
+from core import colors as C
 from core import executor as execmod
 from core import matcher, recon, reporter
-from core.colors import err, info, ok, paint, warn
 
 LOG = logging.getLogger("shellforge")
 
-BANNER = r"""
-  _          _ _  __
- | |__  __ _| | |/ _|___ _ _ __ _ ___
- | '_ \/ _` | | |  _/ _ \ '_/ _` / -_)
- |_.__/\__,_|_|_|_| \___/_| \__, \___|   shellforge
-                            |___/        yalnizca yetkili lab kullanimi
-"""
+_ART = r"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⣀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⢤⣴⠾⠏⠙⠺⠭⠓⢋⡲⠳⠉⢿⠛⣓⠶⠤⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣶⣛⣬⣱⢊⡶⢃⠖⣂⢂⡓⠞⢒⠛⠴⠳⣧⣶⣈⣷⢯⠞⣥⠢⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⣠⣶⣿⣯⡭⢽⡓⠤⣃⠔⣣⢚⡤⢣⠜⡈⢥⠊⠄⠤⢡⣻⡃⠸⣻⣯⣒⣭⡢⢑⠢⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⢠⣾⢿⣿⢛⡻⡱⢎⡜⢣⢌⡓⡌⣆⢣⢃⠆⠱⡈⡒⠈⠠⢹⣧⠁⠀⠠⠉⠙⠻⢽⣷⣌⠈⠠⢀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⣴⡿⣳⣿⡩⢎⡵⣙⠮⡜⣆⠞⣔⡱⣈⣆⡛⣿⣱⣶⠹⣆⣜⢫⡏⠀⠀⠀⡠⠂⡔⠀⠌⡛⣷⡀⢤⡁⡀⠀⠀⠀⠀⠀
+⠀⠀⣼⣿⣿⣿⢷⢻⡞⣴⣩⣚⡝⢮⣟⣾⣳⣿⡾⣽⣎⡷⢯⣛⡷⡾⣯⣾⠄⠀⢀⠂⣠⠎⠰⢡⠀⠙⣿⣄⣄⠌⡄⠀⠀⠀⠀
+⠀⣰⣿⣷⣿⢏⣾⣥⡿⣶⣥⣿⣾⢟⣯⣻⣭⣿⣵⣭⣬⣛⡽⠽⣟⣿⣶⣿⣧⠀⠈⡌⣸⡀⡀⡀⠤⠤⢚⣽⣧⠄⢞⠆⠀⠀⠀
+⢠⢻⠃⣷⣟⣿⣻⣞⣳⣿⣿⣻⣾⣿⣿⣿⣿⠶⠿⠷⢾⣿⣽⡲⢿⣻⣿⣿⣿⡞⡌⠰⢻⣚⠈⠁⠀⠠⠀⠻⣟⣎⠀⠈⡄⠀⠀
+⢸⣿⢰⣿⣿⣳⣽⣾⣿⣿⣿⣿⣿⢟⡍⢥⢶⣹⣒⡤⢊⡥⠉⠻⣷⣍⠷⣽⣿⣿⣿⡔⡙⡿⡀⢀⠸⡐⠀⡀⢻⡿⣞⠰⢰⠀⠀
+⢸⡿⣿⣿⣿⣵⣿⣿⣿⣿⣿⣿⣷⣷⣿⣟⣾⣯⣯⣂⣲⣧⡈⠶⣈⢿⣯⣊⣿⣿⣷⢷⡕⡅⣰⣽⠋⠀⠀⠈⠀⢽⣷⠂⠃⡇⠀
+⢸⣷⣿⣯⣿⣽⣿⣿⣿⣿⣿⣩⣿⣿⣿⠟⠉⠙⠻⢝⣿⣏⢵⡄⠉⡌⢻⣟⣽⣿⣿⡾⢇⢃⣿⠏⠰⠂⠀⠀⠀⡸⣿⡆⡐⠱⠀
+⢸⣹⣾⡱⣿⣿⣿⣿⣷⣿⣿⢹⣿⣿⢡⣾⡿⡙⡀⠠⢱⣣⠙⠉⠀⠸⡪⣿⣼⣿⣿⣿⢿⣭⡌⢢⠀⠁⠀⡀⠀⢰⢿⡇⠀⡘⠀
+⠀⢿⡿⣷⣹⣿⣿⢿⣻⣽⣿⣯⣿⣿⣟⠿⣦⠆⡼⠂⣠⢻⣇⣆⢀⠀⢱⣻⡇⣿⣟⣿⣯⢙⡇⠀⡀⢀⡆⠀⠀⠈⣿⡇⠀⡄⡆
+⠀⠈⣿⣿⣳⠽⣻⣿⣿⣿⣿⣿⣞⡻⢯⢿⡒⡍⠀⣰⣫⡟⣼⡿⠋⠀⣿⣹⠱⣿⣹⣿⣿⠚⠁⢈⠇⠁⠀⠀⠠⢠⣾⡗⠐⠂⣧
+⠀⠀⠘⢿⣯⣎⡱⢟⣿⣿⣿⣿⣿⣿⣶⣗⣰⣶⣾⠟⣋⡜⡉⠀⠁⠀⣶⣿⢱⣿⣿⣿⢇⡄⠉⢀⡠⠁⢀⠡⠡⣨⣿⡇⢠⡐⢶
+⠀⠀⠀⠀⠹⢿⣳⢮⡲⢍⠿⢿⣿⣻⣵⣿⣒⣷⣜⣿⡍⠂⠁⠀⢠⢞⣿⢢⣾⣽⣿⠷⡙⢠⣼⠷⠚⠁⠀⠀⠀⣷⡿⠇⠎⢴⠋
+⠀⠀⠀⠀⠀⠈⠙⢷⣯⣘⣌⡃⠲⠙⠌⠛⡛⠿⠟⠛⠉⠠⣂⣴⣿⡟⣵⣿⣿⣿⢳⢁⣫⣯⠆⠠⠀⠀⠀⠀⠀⣿⣷⢹⠘⠁⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠈⠛⠳⣽⣥⣬⣔⣲⣄⣅⣠⣾⣵⣿⣿⡿⣏⡑⢿⣿⣿⡃⡗⣤⢶⣆⣤⣤⣶⡒⢒⣒⣻⣽⡏⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠛⠛⠚⠿⠿⢿⣿⣿⣿⣥⣸⣿⡟⠋⠞⠉⠉⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠛⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"""
 
 
-class _ColorLogFormatter(logging.Formatter):
-    """Logging formatter that colours console lines by severity."""
+def _print_banner() -> None:
+    """Print the ASCII banner (coloured when the terminal supports it)."""
+    print(C.style(_ART, "bold", "red"))
+    print(C.style("                 s h e l l f o r g e", "bold", "white"))
+    print(C.dim("            yalnizca yetkili lab kullanimi\n"))
 
-    _LEVEL = {
-        logging.DEBUG: "dim",
-        logging.INFO: "info",
-        logging.WARNING: "warn",
-        logging.ERROR: "err",
-        logging.CRITICAL: "err",
+
+def _section(title: str) -> None:
+    """Print a bold, coloured section header to structure the output."""
+    print("\n" + C.style(f"═══[ {title} ]" + "═" * max(4, 44 - len(title)), "bold", "cyan"))
+
+
+class _ConsoleFormatter(logging.Formatter):
+    """Clean, coloured console lines: a severity symbol + the message only."""
+
+    _MAP = {
+        logging.DEBUG: ("[.]", "dim"),
+        logging.INFO: ("[*]", "info"),
+        logging.WARNING: ("[!]", "warn"),
+        logging.ERROR: ("[-]", "err"),
+        logging.CRITICAL: ("[-]", "err"),
     }
 
     def format(self, record: logging.LogRecord) -> str:
-        msg = super().format(record)
-        kind = self._LEVEL.get(record.levelno)
-        return paint(kind, msg) if kind else msg
+        sym, kind = self._MAP.get(record.levelno, ("[*]", "info"))
+        return C.style(f"{sym} {record.getMessage()}", kind)
 
 
 def setup_logging(target: str, reports_dir: Path, to_file: bool) -> Path | None:
-    """Configure console logging (coloured); add a logfile only when requested."""
-    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    """Clean coloured console logging; a detailed logfile only when requested."""
     stream = logging.StreamHandler(sys.stdout)
-    stream.setFormatter(_ColorLogFormatter(fmt))
+    stream.setFormatter(_ConsoleFormatter())
     handlers: list[logging.Handler] = [stream]
 
     logfile: Path | None = None
@@ -68,7 +92,9 @@ def setup_logging(target: str, reports_dir: Path, to_file: bool) -> Path | None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         logfile = reports_dir / f"shellforge_{target.replace(':', '_')}_{ts}.log"
         fh = logging.FileHandler(logfile, encoding="utf-8")
-        fh.setFormatter(logging.Formatter(fmt))  # plain text in the logfile
+        fh.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
         handlers.append(fh)
 
     logging.basicConfig(level=logging.INFO, handlers=handlers)
@@ -105,18 +131,17 @@ def prompt_for_target() -> str | None:
     Loops until a valid single IP is entered. Returns ``None`` if the user
     cancels (empty input + Ctrl+C / EOF).
     """
-    print(BANNER)
-    print("Otonom lab exploit zinciri. Tek hedef, yalnızca yetkili lab.\n")
+    _print_banner()
     try:
         while True:
-            raw = input(info("[?] Kurban IP (tek adres): ")).strip()
+            raw = input(C.style("[?] Kurban IP (tek adres): ", "bold", "info")).strip()
             if not raw:
-                print("    (Boş. Çıkmak için Ctrl+C.)")
+                print(C.dim("    (Boş. Çıkmak için Ctrl+C.)"))
                 continue
             try:
                 return validate_single_ip(raw)
             except argparse.ArgumentTypeError as exc:
-                print(err(f"    [!] {exc}\n"))
+                print(C.err(f"    [!] {exc}\n"))
     except (EOFError, KeyboardInterrupt):
         print()
         return None
@@ -127,7 +152,7 @@ def load_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.exists():
         print(
-            err(f"[!] Yapılandırma dosyası '{p}' bulunamadı. Önce şablonu kopyala:")
+            C.err(f"[!] Yapılandırma dosyası '{p}' bulunamadı. Önce şablonu kopyala:")
             + f"\n      cp config.yaml.example {p}\n",
             file=sys.stderr,
         )
@@ -236,10 +261,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Resolve the target: from --target if given (validated here), otherwise
-    # ask the user interactively.
+    # Resolve the target: from --target if given (validated here), otherwise ask.
     if args.target:
-        print(BANNER)
+        _print_banner()
         try:
             args.target = validate_single_ip(args.target)
         except argparse.ArgumentTypeError as exc:
@@ -247,16 +271,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         resolved = prompt_for_target()
         if resolved is None:
-            print(err("[!] Hedef girilmedi. Çıkılıyor."))
+            print(C.err("[!] Hedef girilmedi. Çıkılıyor."))
             return 1
-
         args.target = resolved
 
     config = load_config(args.config)
     reports_dir = Path("reports")
     setup_logging(args.target, reports_dir, to_file=args.rapor)
 
-    LOG.info("Hedef: %s", args.target)
+    print(C.style("    Hedef: ", "bold") + C.style(args.target, "bold", "ok"))
 
     # Auto-detect LHOST so the user never has to edit config for a basic run.
     handler = config.setdefault("handler", {})
@@ -264,15 +287,13 @@ def main(argv: list[str] | None = None) -> int:
     if lhost.lower() in ("", "auto"):
         detected = detect_lhost(args.target)
         handler["lhost"] = detected
-        LOG.info("LHOST otomatik belirlendi: %s", detected)
-        print(info(f"[*] LHOST otomatik belirlendi: {detected}"))
+        print(C.style("    LHOST: ", "bold") + C.style(detected, "bold", "ok") + C.dim("  (otomatik)"))
 
     the_executor: execmod.Executor | None = None
     msf_proc = None  # msfrpcd process if shellforge started it
 
     def handle_sigint(signum, frame):  # noqa: ANN001 - signal handler signature
         LOG.warning("Ctrl+C alındı -- durduruluyor ve temizleniyor.")
-        print(err("\n[!] Kesildi. shellforge'un açtığı oturumlar temizleniyor..."))
         if the_executor is not None:
             the_executor.cleanup()
         if msf_proc is not None:
@@ -287,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         # --- 1. RECON -------------------------------------------------------
+        _section("KEŞİF")
         recon_cfg = config.get("recon", {})
         recon_result = recon.run_recon(
             target=args.target,
@@ -297,14 +319,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         open_services = recon_result.open_services()
         if not open_services:
-            print(warn("[!] Açık servis bulunamadı. Yapılacak bir şey yok."))
+            LOG.warning("Açık servis bulunamadı. Yapılacak bir şey yok.")
             if args.rapor:
                 _write_report(args.target, recon_result, matches, attempts, reports_dir)
             return 0
 
         # --- 2. CONNECT (auto-start msfrpcd if needed) + MATCH -------------
+        _section("EŞLEŞTİRME")
         msf_cfg = config.get("msfrpc", {})
-        print(info("[*] Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)..."))
+        LOG.info("Metasploit RPC'ye bağlanılıyor (çalışmıyorsa otomatik başlatılır)...")
         client, msf_proc = execmod.connect_or_start(
             host=msf_cfg.get("host", "127.0.0.1"),
             port=int(msf_cfg.get("port", 55553)),
@@ -313,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
             ssl=bool(msf_cfg.get("ssl", True)),
         )
         if msf_proc is not None:
-            print(info(f"[*] msfrpcd otomatik başlatıldı (PID {msf_proc.pid})."))
+            LOG.info("msfrpcd otomatik başlatıldı (PID %s).", msf_proc.pid)
 
         matches = matcher.match_services(
             open_services,
@@ -322,16 +345,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         candidates = matcher.flatten_candidates(matches)
         if not candidates:
-            print(warn("[!] Denenebilir Metasploit adayı bulunamadı."))
+            LOG.warning("Denenebilir Metasploit adayı bulunamadı.")
             if args.rapor:
                 _write_report(args.target, recon_result, matches, attempts, reports_dir)
             if msf_proc is not None:
                 _stop_proc(msf_proc)
             return 0
 
-        print(info(f"[*] {len(candidates)} aday modül sıraya alındı (en güvenilir önce)."))
+        print(
+            C.style("[*] ", "info")
+            + C.style(str(len(candidates)), "bold", "info")
+            + C.info(" aday modül sıraya alındı (en güvenilir önce).")
+        )
 
         # --- 3-5. DRY-RUN + FIRE + VERIFY ----------------------------------
+        _section("SÖMÜRÜ")
         the_executor = execmod.Executor(client, args.target, config)
         attempts = the_executor.run(candidates)
 
@@ -339,27 +367,31 @@ def main(argv: list[str] | None = None) -> int:
         success = next((a for a in attempts if getattr(a, "success", False)), None)
         if success is not None:
             sid = success.session_id
-            print(ok(f"\n[+] SHELL ALINDI! Oturum {sid} ({success.session_type or '?'})."))
+            print()
+            print(C.style("  ╔══════════════════════════════════════╗", "bold", "ok"))
+            print(
+                C.style("  ║  ", "bold", "ok")
+                + C.style(f"SHELL ALINDI  —  oturum {sid} ({success.session_type or '?'})", "bold", "ok")
+            )
+            print(C.style("  ╚══════════════════════════════════════╝", "bold", "ok"))
             if args.pencere:
                 if _launch_window_attach(msf_cfg, sid):
-                    print(info("[*] Oturum yeni bir gnome-terminal penceresinde açıldı."))
+                    LOG.info("Oturum yeni bir gnome-terminal penceresinde açıldı.")
                 else:
-                    print(warn("[*] gnome-terminal yok; bu pencerede bağlanılıyor."))
+                    LOG.warning("gnome-terminal yok; bu pencerede bağlanılıyor.")
                     the_executor.interact(sid)
             else:
                 the_executor.interact(sid)
         else:
-            print(warn("\n[-] Shell alınamadı. Tüm adaylar denendi."))
+            print(C.style("\n  ✗ Shell alınamadı. Tüm adaylar denendi.", "bold", "warn"))
 
     except execmod.MsfConnectionError as exc:
         LOG.error("%s", exc)
-        print(err(f"\n[!] {exc}"))
         if args.rapor:
             _write_report(args.target, recon_result, matches, attempts, reports_dir)
         return 3
     except Exception as exc:  # noqa: BLE001 - top-level guard
         LOG.exception("Beklenmeyen hata: %s", exc)
-        print(err(f"[!] Beklenmeyen hata: {exc}"))
         if args.rapor:
             _write_report(args.target, recon_result, matches, attempts, reports_dir)
         if msf_proc is not None:
@@ -373,18 +405,18 @@ def main(argv: list[str] | None = None) -> int:
         json_path, md_path = _write_report(
             args.target, recon_result, matches, attempts, reports_dir
         )
-        print(info(f"[*] JSON rapor: {json_path}"))
-        print(info(f"[*] MD rapor:   {md_path}"))
+        print(C.info(f"[*] JSON rapor: {json_path}"))
+        print(C.info(f"[*] MD rapor:   {md_path}"))
 
     # If shellforge started msfrpcd: keep it alive when a session landed so the
     # shell survives (per design); otherwise shut it back down.
     if msf_proc is not None:
         if succeeded:
-            print(info(f"[*] msfrpcd açık bırakıldı (PID {msf_proc.pid}) — oturum canlı."))
-            print(info(f"    Durdurmak için: kill {msf_proc.pid}"))
+            print(C.info(f"[*] msfrpcd açık bırakıldı (PID {msf_proc.pid}) — oturum canlı."))
+            print(C.dim(f"    Durdurmak için: kill {msf_proc.pid}"))
         else:
             _stop_proc(msf_proc)
-            print(info("[*] Otomatik başlatılan msfrpcd kapatıldı."))
+            LOG.info("Otomatik başlatılan msfrpcd kapatıldı.")
 
     return 0 if succeeded else 4
 
