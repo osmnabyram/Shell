@@ -26,8 +26,22 @@ if ! command -v apt-get >/dev/null 2>&1; then
   exit 2
 fi
 
-say "Paket listesi guncelleniyor..."
-$SUDO apt-get update -y
+# apt-get update bazi kutularda (bozuk 3. parti repo, yavas ayna) cok yavas.
+# Atlamak icin:  SC_SKIP_UPDATE=1 sudo ./setup.sh   (ya da ./setup.sh --skip-update)
+SKIP_UPDATE="${SC_SKIP_UPDATE:-0}"
+for a in "$@"; do
+  case "$a" in
+    --skip-update|-n) SKIP_UPDATE=1 ;;
+  esac
+done
+
+if [ "$SKIP_UPDATE" = "1" ]; then
+  warn "apt-get update atlandi (mevcut paket listesi kullanilacak)."
+else
+  say "Paket listesi guncelleniyor... (yavassa Ctrl+C ile durdurup"
+  warn "SC_SKIP_UPDATE=1 sudo ./setup.sh ile tekrar dene)"
+  $SUDO apt-get update -y
+fi
 
 say "Dis araclar kuruluyor..."
 $SUDO apt-get install -y "${APT_PKGS[@]}" || warn "Bazi paketler kurulamadi (asagi bak)."

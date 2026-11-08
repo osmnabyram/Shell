@@ -205,8 +205,13 @@ def install_missing(assume_yes: bool = False) -> int:
     rc = 0
     if packages:
         sudo = [] if os.geteuid() == 0 else ["sudo"]  # type: ignore[attr-defined]
-        print(C.dim("\n  apt-get update ..."))
-        tools.run(sudo + ["apt-get", "update"], timeout=600)
+        # apt-get update is slow/broken on some boxes (3rd-party repos); skip it
+        # with SC_SKIP_UPDATE=1 and install straight from the cached lists.
+        if os.environ.get("SC_SKIP_UPDATE") == "1":
+            print(C.dim("\n  apt-get update atlandi (SC_SKIP_UPDATE=1)."))
+        else:
+            print(C.dim("\n  apt-get update ... (yavassa: SC_SKIP_UPDATE=1 ile atla)"))
+            tools.run(sudo + ["apt-get", "update"], timeout=600)
         print(C.dim("  apt-get install ..."))
         res = tools.run(sudo + ["apt-get", "install", "-y", *packages], timeout=1800)
         if res.stdout:
