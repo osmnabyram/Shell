@@ -364,11 +364,9 @@ def main(argv: list[str] | None = None) -> int:
         # --- 1. RECON -------------------------------------------------------
         _section("KESIF")
         recon_cfg = config.get("recon", {})
-        nmap_args = recon_cfg.get("nmap_arguments", "-sV -Pn")
-        if recon_cfg.get("os_detection") and "-O" not in nmap_args:
-            nmap_args += " -O"  # enables the profiler's OS-family guess (needs root)
-        if recon_cfg.get("default_scripts") and "-sC" not in nmap_args:
-            nmap_args += " -sC"
+        nmap_args = recon.build_nmap_args(recon_cfg)
+        LOG.info("Tarama profili: %s (%s)",
+                 recon_cfg.get("scan_profile", "normal"), nmap_args)
         recon_result = recon.run_recon(
             target=args.target,
             nmap_arguments=nmap_args,

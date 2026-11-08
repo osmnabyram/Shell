@@ -33,10 +33,20 @@ payloads:
   generic: generic/shell_reverse_tcp
 
 recon:
-  nmap_arguments: "-sV -Pn"  # -oX is added automatically for XML parsing
-  timeout: 300               # seconds
+  # Scan breadth. The default top-1000 silently misses a service on a high
+  # port (and with it, maybe your shell), so pick how wide to look:
+  #   fast       - top 100 ports (quick triage)
+  #   normal     - nmap default top 1000 + version detection
+  #   full       - ALL 65535 TCP ports (recommended for a real pentest)
+  #   aggressive - all ports, faster timing, exhaustive version probing
+  scan_profile: full
+  # Set nmap_arguments to override the profile entirely with your own flags.
+  # nmap_arguments: "-sV -Pn"   # -oX is added automatically for XML parsing
+  timeout: 600               # seconds (raise for full/aggressive on slow links)
   os_detection: false        # append -O for an OS-family guess (needs root)
   default_scripts: false     # append -sC (nmap default NSE scripts)
+  udp_scan: false            # also scan common UDP services (needs root, slow)
+  udp_top_ports: 50          # how many top UDP ports when udp_scan is on
 
 # nmap NSE vulnerability scan (part of the "vulnscan" phase). Runs the nmap
 # vuln scripts over the discovered open ports; a host confirmed VULNERABLE to a
@@ -131,6 +141,7 @@ bruteforce:
 post_exploitation:
   enabled: true
   loot: true                 # read /etc/passwd (or /etc/shadow + hashdump if root)
+  deep_loot: true            # also sweep SSH keys, histories, app config creds (Linux shell)
   privesc_suggester: true    # run post/multi/recon/local_exploit_suggester (meterpreter)
   auto_escalate: true        # meterpreter getsystem; live kernel exploits still need
                              # strategy.allow_dangerous=true

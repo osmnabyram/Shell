@@ -63,7 +63,9 @@ what it learns as it runs (see [Autonomous engine](#autonomous-engine)).
 </div>
 
 1. **Target** — start from a single lab IP you own or are authorized to test.
-2. **Recon** — `nmap -sV -Pn` (optionally `-O`/`-sC`) discovers open services.
+2. **Recon** — `nmap` discovers open services via a configurable scan profile
+   (`fast` / `normal` / `full` all-65535-ports / `aggressive`, plus optional
+   `-O`/`-sC` and a UDP pass) so a service on a high port is never missed.
 3. **Profile** — recon is turned into a target model: an OS-family guess and
    every service sorted into a category (web / smb / ftp / ssh / db / ...).
 4. **Vulnerability analysis** — each service is matched against a curated
@@ -202,10 +204,12 @@ level, then on meterpreter runs `getsystem` + `local_exploit_suggester`, and on
 a shell enumerates the Linux privesc surface (`sudo -l`, SUID/GTFOBins sweep,
 kernel version, cron) and suggests concrete escalation paths. Loot is read-only
 and proportionate (`/etc/passwd`, or `/etc/shadow` + `hashdump` only once
-privileged); any hashes looted are then handed to `john` (or `hashcat`) for an
-offline, time-boxed crack and the recovered passwords are added to the
-credential pool. Firing crash-prone exploits or live kernel privesc stays gated
-behind `strategy.allow_dangerous`.
+privileged); a deeper sweep then collects SSH private keys, shell histories and
+application config/`.env` credentials (`wp-config.php`, `settings.py`, …),
+parsing any user/password it finds back into the credential pool for reuse. Any
+hashes looted are handed to `john` (or `hashcat`) for an offline, time-boxed
+crack and the recovered passwords are added too. Firing crash-prone exploits or
+live kernel privesc stays gated behind `strategy.allow_dangerous`.
 
 ---
 
@@ -213,7 +217,7 @@ behind `strategy.allow_dangerous`.
 
 | Stage | What happens |
 |---|---|
-| Recon | `nmap -sV -Pn` (+`-O`/`-sC` optional), XML parsed into structured services |
+| Recon | `nmap` scan profile (`fast`/`normal`/`full`/`aggressive`, optional `-O`/`-sC`/UDP), XML parsed into structured services |
 | Profile | OS-family inference + per-category service grouping into a `TargetProfile` |
 | Strategy | per-category decision tree + MSF search -> a scored, phased `AttackPlan` |
 | Enumerate | auxiliary scanners gather intel; findings feed back into the plan |
@@ -222,7 +226,7 @@ behind `strategy.allow_dangerous`.
 | Exploit | knowledge-base + version-matched modules, `check()` dry-run, fired by score |
 | Credentials | default/weak-login checks + reuse; a success can drop a session directly |
 | Verify | a harmless command confirms the session and captures proof |
-| Post-exp | automatic triage: whoami, privilege check, privesc suggestions, loot |
+| Post-exp | automatic triage: whoami, privilege check, privesc suggestions, deep loot (keys/histories/config creds) |
 | Handoff | the interactive shell opens in a new terminal window |
 
 ---

@@ -17,6 +17,45 @@ import nmap
 
 logger = logging.getLogger("ShellCracker.recon")
 
+# Named scan profiles. A single service/version scan can only find what it
+# looks at, and the default nmap top-1000 silently misses a shell waiting on a
+# high port -- so the profile is the one knob that decides scan breadth.
+#   fast       - top 100 ports, quick triage
+#   normal     - nmap default (top 1000) + version detection (the old default)
+#   full       - every one of the 65535 TCP ports (nothing is missed)
+#   aggressive - all ports, faster timing, exhaustive version probing
+_SCAN_PROFILES: dict[str, str] = {
+    "fast": "-sV -Pn -T4 --top-ports 100",
+    "normal": "-sV -Pn",
+    "full": "-sV -Pn -p-",
+    "aggressive": "-sV -Pn -p- -T4 --version-all",
+}
+
+
+def build_nmap_args(recon_cfg: dict) -> str:
+    """Compose the final nmap argument string from the recon config.
+
+    ``scan_profile`` picks the breadth; an explicit ``nmap_arguments`` overrides
+    it entirely (backward compatible). ``os_detection`` (-O), ``default_scripts``
+    (-sC) and ``udp_scan`` (-sU --top-ports N) are layered on top of either.
+    """
+    cfg = recon_cfg or {}
+    explicit = cfg.get("nmap_arguments")
+    if explicit:
+        args = str(explicit)
+    else:
+        profile = str(cfg.get("scan_profile", "normal")).lower()
+        args = _SCAN_PROFILES.get(profile, _SCAN_PROFILES["normal"])
+
+    if cfg.get("os_detection") and "-O" not in args:
+        args += " -O"            # profiler OS-family guess (needs root)
+    if cfg.get("default_scripts") and "-sC" not in args:
+        args += " -sC"           # nmap default NSE scripts
+    if cfg.get("udp_scan") and "-sU" not in args:
+        top = int(cfg.get("udp_top_ports", 50))
+        args += f" -sU --top-ports {top}"  # common UDP services (snmp/tftp/dns)
+    return args
+
 
 @dataclass
 class Service:
