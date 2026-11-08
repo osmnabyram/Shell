@@ -7,7 +7,7 @@ Given a :class:`~core.profiler.TargetProfile` it builds an :class:`AttackPlan`
 1. a **per-category playbook** (the decision tree): for every service category
    a curated set of enumeration + credential modules (``_PLAYBOOK``);
 2. a **knowledge base of high-signal exploits** (``_KNOWN_EXPLOITS``): curated
-   service-fingerprint → exploit mappings for the classics (vsftpd 2.3.4,
+   service-fingerprint -> exploit mappings for the classics (vsftpd 2.3.4,
    UnrealIRCd, Samba usermap, distcc, EternalBlue, Shellshock, ...), so the
    engine does not depend on a text search returning them;
 3. the **version-matched MSF exploit net**: ``modules.search`` per service,
@@ -51,7 +51,13 @@ from .recon import Service
 logger = logging.getLogger("ShellCracker.strategy")
 
 # Phase execution order. The executor honours this unless config overrides it.
-PHASES = ("enumerate", "exploit", "credentials", "misconfig")
+# Two phases run external tools rather than MSF vectors (the executor
+# special-cases them, feeding their findings back into the plan):
+#   * ``vulnscan``   -- active web recon (whatweb/nuclei/gobuster/nikto);
+#   * ``bruteforce`` -- hydra credential attacks against login services.
+# Both run before ``exploit`` so a fingerprinted product or a discovered
+# credential unlocks the matching (incl. credential-gated) exploits in time.
+PHASES = ("enumerate", "vulnscan", "bruteforce", "exploit", "credentials", "misconfig")
 
 # MSF rank -> points (0..40), blended into a vector's score.
 _RANK_POINTS = {
@@ -189,6 +195,34 @@ _PLAYBOOK: dict[str, dict[str, Any]] = {
         "enum": [("scanner/misc/java_rmi_server", "Java RMI kayit/sinif yukleme kontrolu")],
         "login": [],
     },
+    "ajp": {
+        "enum": [("scanner/http/tomcat_mgr_login", "Tomcat Manager (AJP arkasi) login kontrolu")],
+        "login": [],
+    },
+    "winrm": {
+        "enum": [("scanner/winrm/winrm_auth_methods", "WinRM kimlik yontemleri tespiti")],
+        "login": ["scanner/winrm/winrm_login"],
+    },
+    "rsync": {
+        "enum": [("scanner/rsync/modules_list", "rsync disa acik modul/paylasim listesi")],
+        "login": [],
+    },
+    "elasticsearch": {
+        "enum": [("scanner/elasticsearch/indices_enum", "Elasticsearch indeks/veri enum (kimliksiz)")],
+        "login": [],
+    },
+    "couchdb": {
+        "enum": [("scanner/couchdb/couchdb_enum", "CouchDB veritabani enum (kimliksiz)")],
+        "login": [],
+    },
+    "memcached": {
+        "enum": [("scanner/misc/memcached_extractor", "Memcached bellek dokumu (kimliksiz)")],
+        "login": [],
+    },
+    "docker": {
+        "enum": [("scanner/http/docker_version", "Docker API acik mi / surum")],
+        "login": [],
+    },
 }
 
 
@@ -251,6 +285,40 @@ _KNOWN_EXPLOITS: list[dict[str, Any]] = [
     dict(id="webmin", pred=_pred(product_subs=("webmin",)),
          module="unix/webapp/webmin_backdoor", rank="excellent",
          note="Webmin arka kapisi (CVE-2019-15107)"),
+    # --- modern / high-prevalence web app RCEs -------------------------------
+    dict(id="struts2_s2045", pred=_pred(product_subs=("struts",)),
+         module="multi/http/struts2_content_type_ognl", rank="excellent",
+         note="Apache Struts2 S2-045 OGNL RCE (CVE-2017-5638)"),
+    dict(id="struts2_s2057", pred=_pred(product_subs=("struts",)),
+         module="multi/http/struts2_namespace_ognl", rank="great",
+         note="Apache Struts2 S2-057 namespace OGNL RCE (CVE-2018-11776)"),
+    dict(id="tomcat_jsp_put", pred=_pred(product_subs=("tomcat", "coyote")),
+         module="multi/http/tomcat_jsp_upload_bypass", rank="excellent",
+         note="Tomcat PUT ile JSP yukleme RCE (CVE-2017-12617)"),
+    dict(id="jenkins_sc", pred=_pred(product_subs=("jenkins",)),
+         module="multi/http/jenkins_script_console", rank="excellent",
+         note="Jenkins Script Console RCE (acik/zayif erisim)"),
+    dict(id="jboss_deploy", pred=_pred(product_subs=("jboss",)),
+         module="multi/http/jboss_invoke_deploy", rank="excellent",
+         note="JBoss JMX invoker ile WAR deploy RCE"),
+    dict(id="couchdb_rce", pred=_pred(product_subs=("couchdb",)),
+         module="linux/http/apache_couchdb_cmd_exec", rank="excellent",
+         note="Apache CouchDB komut calistirma (CVE-2017-12636)"),
+    dict(id="elastic_groovy", pred=_pred(product_subs=("elasticsearch",)),
+         module="multi/elasticsearch/search_groovy_script", rank="excellent",
+         note="Elasticsearch Groovy sandbox RCE (CVE-2015-1427)"),
+    dict(id="docker_api", pred=_pred(name_subs=("docker",), product_subs=("docker",)),
+         module="linux/http/docker_daemon_tcp", rank="excellent",
+         note="Korumasiz Docker API ile konteyner RCE"),
+    dict(id="confluence_ognl", pred=_pred(product_subs=("confluence",)),
+         module="multi/http/atlassian_confluence_webwork_ognl_injection",
+         rank="excellent", note="Confluence OGNL enjeksiyonu RCE (CVE-2021-26084)"),
+    dict(id="joomla_hdr", pred=_pred(product_subs=("joomla",)),
+         module="unix/webapp/joomla_http_header_rce", rank="great",
+         note="Joomla HTTP header object injection RCE (CVE-2015-8562)"),
+    dict(id="apache_pathtrav", pred=_pred(product_subs=("apache", "httpd")),
+         module="multi/http/apache_normalize_path_rce", rank="great",
+         note="Apache 2.4.49/50 path traversal RCE (CVE-2021-41773)"),
     dict(id="ms17_010", pred=_pred(name_subs=("microsoft-ds", "netbios-ssn")),
          module="windows/smb/ms17_010_eternalblue", rank="great", os="windows",
          note="MS17-010 EternalBlue"),
@@ -264,6 +332,9 @@ _KNOWN_EXPLOITS: list[dict[str, Any]] = [
     dict(id="tomcat_mgr", pred=_pred(product_subs=("tomcat", "coyote")),
          module="multi/http/tomcat_mgr_upload", rank="excellent",
          needs_creds=True, note="Tomcat Manager WAR yukleme (kimlik gerekli)"),
+    dict(id="wp_admin_upload", pred=_pred(product_subs=("wordpress",)),
+         module="unix/webapp/wp_admin_shell_upload", rank="excellent",
+         needs_creds=True, note="WordPress admin ile tema/eklenti shell yukleme (kimlik gerekli)"),
     dict(id="postgres_payload", pred=_pred(name_subs=("postgresql", "postgres")),
          module="linux/postgres/postgres_payload", rank="excellent",
          needs_creds=True, note="PostgreSQL kimlikli kod calistirma"),
@@ -279,11 +350,14 @@ _KNOWN_EXPLOITS: list[dict[str, Any]] = [
 # --- Built-in credential lists (small: default-cred checks, not brute force) --
 _COMMON_USERS = [
     "root", "admin", "administrator", "user", "guest", "msfadmin",
-    "service", "test", "sys", "operator",
+    "service", "test", "sys", "operator", "ubuntu", "kali", "oracle",
+    "postgres", "tomcat", "manager", "ftp", "www-data", "support",
 ]
 _COMMON_PASSWORDS = [
     "", "password", "admin", "root", "toor", "msfadmin", "123456",
-    "letmein", "pass", "test", "changeme", "admin123",
+    "letmein", "pass", "test", "changeme", "admin123", "password123",
+    "P@ssw0rd", "Password1", "123456789", "qwerty", "welcome",
+    "root123", "admin@123", "tomcat", "manager", "1234",
 ]
 _SERVICE_USERS: dict[str, list[str]] = {
     "mysql": ["root", "mysql", "admin"],
@@ -627,6 +701,16 @@ class StrategyEngine:
                 self._add_version_exploits(f.category, svc)
                 if len(self.plan) > before:
                     new.extend(self.plan.all()[before:])
+                if f.detail:
+                    self.profile.notes.append(f.detail)
+
+            else:
+                # Generic capture: web-enum / nuclei / nikto / exposed-path and
+                # any other fact-style finding. Record it so the report and later
+                # decisions can use it, without needing a dedicated branch.
+                self.profile.add_fact(f.key, f.value)
+                if f.detail:
+                    self.profile.notes.append(f.detail)
 
         if new:
             logger.info("Adaptif: %d yeni/guclendirilmis vektor.", len(new))

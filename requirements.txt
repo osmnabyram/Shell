@@ -1,3 +1,23 @@
+# Python dependencies
 python-nmap>=0.7.1
 pymetasploit3>=1.0.3
 PyYAML>=6.0
+
+# --- External CLI tools (NOT pip packages) --------------------------------
+# ShellCracker orchestrates these if present and skips them if absent. Install
+# the ones you want on your Kali/lab box:
+#
+#   core engine : nmap, metasploit-framework (msfconsole, msfrpcd, msfvenom),
+#                 searchsploit (exploitdb)
+#   vulnscan    : whatweb, nuclei, gobuster (or ffuf), nikto
+#   bruteforce  : hydra
+#   hash crack  : john (john-the-ripper) and/or hashcat  + a wordlist (rockyou)
+#
+# On Kali:
+#   sudo apt install -y nmap metasploit-framework exploitdb \
+#       whatweb nikto gobuster ffuf hydra john hashcat wordlists
+#   # nuclei (Go): sudo apt install -y nuclei   OR
+#   #   go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+#   nuclei -update-templates
+#   # rockyou is shipped gzipped on Kali:
+#   #   sudo gzip -d /usr/share/wordlists/rockyou.txt.gz

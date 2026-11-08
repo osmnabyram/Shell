@@ -38,9 +38,10 @@ already-installed tools for you, logging each step along the way.
 
 It is an orchestration layer with a decision engine on top: it does **not**
 contain or develop exploit code of its own. Reconnaissance is delegated to
-`nmap`, exploit/auxiliary selection to the Metasploit module database and
-Exploit-DB, and every attempt runs through the Metasploit framework over
-`msfrpc`. What ShellCracker adds is the **autonomous strategy** — it profiles
+`nmap`, web attack-surface analysis to `whatweb`/`nuclei`/`gobuster`/`nikto`,
+exploit/auxiliary selection to the Metasploit module database and Exploit-DB,
+and every attempt runs through the Metasploit framework over `msfrpc`. What
+ShellCracker adds is the **autonomous strategy** — it profiles
 the target, builds a scored per-service attack plan, and adapts that plan to
 what it learns as it runs (see [Autonomous engine](#autonomous-engine)).
 
@@ -65,14 +66,18 @@ what it learns as it runs (see [Autonomous engine](#autonomous-engine)).
 3. **Profile** — recon is turned into a target model: an OS-family guess and
    every service sorted into a category (web / smb / ftp / ssh / db / ...).
 4. **Vulnerability analysis** — each service is matched against a curated
-   knowledge base of high-signal exploits *and* the live Metasploit module DB.
+   knowledge base of high-signal exploits *and* the live Metasploit module DB;
+   web services additionally get an active external-tool pass (`whatweb`,
+   `nuclei`, `gobuster`/`ffuf`, `nikto`) whose findings widen the plan.
 5. **Strategy** — the brain walks a broad per-category decision tree and builds
    a **scored, phased attack plan** covering every avenue it can see.
-6. **Execute** — the plan runs phase by phase and **adapts**: enumeration
-   findings feed back and reshape what gets fired next; discovered credentials
-   are reused across every other service.
+6. **Execute** — the plan runs phase by phase and **adapts**: enumeration and
+   web-scan findings feed back and reshape what gets fired next; `hydra`
+   credential attacks run against login services, and any discovered credential
+   is reused across every other service and unlocks credential-gated exploits.
 7. **Post-exploitation** — a landed session is triaged automatically: who am I,
-   am I privileged, privilege-escalation paths, and low-risk loot.
+   am I privileged, privilege-escalation paths, low-risk loot, and offline
+   cracking of any looted hashes (`john`/`hashcat`) back into usable passwords.
 8. **Shell** — the verified session is handed to you interactively in a new
    terminal window, already triaged.
 
@@ -86,18 +91,40 @@ The point of ShellCracker is that it *reasons* about the target instead of
 running a fixed list. After recon, the [`profiler`](core/profiler.py) builds a
 `TargetProfile` and the [`strategy`](core/strategy.py) engine turns it into an
 `AttackPlan` of scored `AttackVector`s, grouped into phases that run in order —
-cheap and safe first, loud and destructive last — then the executor runs them
+cheap and safe first, loud and intrusive last — then the executor runs them
 adaptively and, on success, hands off to [`postexp`](core/postexp.py).
 
 ### Phases
 
-| Phase | What it does | Example modules |
+| Phase | What it does | Example modules / tools |
 |---|---|---|
 | **enumerate** | low-risk intel gathering; feeds the feedback loop | `smb_version`, `smb_ms17_010`, `ftp/anonymous`, `http_header`, `smtp_enum`, `snmp_enum`, `nfsmount` |
-| **exploit** | knowledge-base + version-matched MSF exploits, behind a reverse handler | `vsftpd_234_backdoor`, `ms17_010_eternalblue`, `samba/usermap_script`, plus whatever `modules.search` returns |
+| **vulnscan** | active external-tool web pass; findings widen the plan | `whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto` |
+| **bruteforce** | wordlist credential attacks; a hit is tried straight into a session | `hydra` (ssh/ftp/smb/mysql/mssql/postgres/rdp/vnc/telnet/…) |
+| **exploit** | knowledge-base + version-matched MSF exploits, behind a reverse handler | `vsftpd_234_backdoor`, `ms17_010_eternalblue`, `samba/usermap_script`, `struts2_content_type_ognl`, `tomcat_jsp_upload_bypass`, `docker_daemon_tcp`, plus whatever `modules.search` returns |
 | **credentials** | default/weak-login checks, then credential **reuse** across services | `ssh_login`, `smb_login`, `ftp_login`, `mysql_login`, `vnc_login` |
 | **misconfig** | abuse of exposed configuration | NFS exports, writable shares, anonymous access |
 | **post-exploitation** | automatic triage of every landed session | `local_exploit_suggester`, `getsystem`, `sudo -l`, SUID sweep, `hashdump` |
+
+### Active vuln-scan phase (external tools)
+
+Between enumeration and exploitation, the **vulnscan** phase points a suite of
+best-in-class CLI tools at the target's web services and turns their output into
+findings that feed straight back into the plan (see
+[`webenum`](core/webenum.py) + the uniform external-tool runner
+[`tools`](core/tools.py)):
+
+- `whatweb` — technology/product fingerprinting;
+- `nuclei` — thousands of template-based CVE / misconfig / exposure checks;
+- `gobuster` / `ffuf` — hidden directory & file discovery;
+- `nikto` — classic web-server issues (opt-in; slower).
+
+A product fingerprinted here (Drupal, Tomcat, Struts, Jenkins, …) or a path it
+uncovers (`/manager/html`, `/wp-login.php`, …) becomes a `product` finding,
+which the engine immediately converts into knowledge-base and version-matched
+exploit vectors **before** the exploit phase runs. Every tool is optional:
+whatever is not installed is skipped with a note, never a crash, so ShellCracker
+runs on whatever subset a given box has.
 
 ### Three sources of attacks
 
@@ -112,8 +139,11 @@ depends on a single heuristic:
 2. **Knowledge base of high-signal exploits** (`_KNOWN_EXPLOITS`) — curated
    fingerprint → exploit rules for the classics (vsftpd 2.3.4, ProFTPD 1.3.3c,
    UnrealIRCd, Samba `usermap_script`, distcc, Java-RMI, Shellshock, PHP-CGI,
-   Drupalgeddon2, EternalBlue, MS08-067, …). These are injected directly and
-   get a *killer bonus* so they outrank noisy search hits.
+   Drupalgeddon2, EternalBlue, MS08-067) **and modern/high-prevalence targets**
+   (Struts2 S2-045/S2-057, Tomcat JSP-upload + Manager, Jenkins, JBoss, CouchDB,
+   Elasticsearch Groovy, unprotected Docker API, Confluence OGNL, Joomla,
+   WordPress admin upload, Apache 2.4.49 path traversal, …). These are injected
+   directly and get a *killer bonus* so they outrank noisy search hits.
 3. **Version-matched MSF net** — `modules.search` per service, ranked by MSF
    reliability and by how specifically the module matches the detected version.
 
@@ -151,7 +181,9 @@ level, then on meterpreter runs `getsystem` + `local_exploit_suggester`, and on
 a shell enumerates the Linux privesc surface (`sudo -l`, SUID/GTFOBins sweep,
 kernel version, cron) and suggests concrete escalation paths. Loot is read-only
 and proportionate (`/etc/passwd`, or `/etc/shadow` + `hashdump` only once
-privileged). Firing crash-prone exploits or live kernel privesc stays gated
+privileged); any hashes looted are then handed to `john` (or `hashcat`) for an
+offline, time-boxed crack and the recovered passwords are added to the
+credential pool. Firing crash-prone exploits or live kernel privesc stays gated
 behind `strategy.allow_dangerous`.
 
 ---
@@ -164,6 +196,8 @@ behind `strategy.allow_dangerous`.
 | Profile | OS-family inference + per-category service grouping into a `TargetProfile` |
 | Strategy | per-category decision tree + MSF search → a scored, phased `AttackPlan` |
 | Enumerate | auxiliary scanners gather intel; findings feed back into the plan |
+| Vuln-scan | external web tools (`whatweb`/`nuclei`/`gobuster`/`nikto`) widen the plan |
+| Brute-force | `hydra` wordlist attacks on login services; a hit is tried into a session |
 | Exploit | knowledge-base + version-matched modules, `check()` dry-run, fired by score |
 | Credentials | default/weak-login checks + reuse; a success can drop a session directly |
 | Verify | a harmless command confirms the session and captures proof |
@@ -200,6 +234,9 @@ Siber-ShellCracker/
 │   ├── profiler.py       # recon -> TargetProfile (OS guess, categories, facts)
 │   ├── strategy.py       # the brain: profile -> scored, phased AttackPlan
 │   ├── matcher.py        # services -> ranked candidate exploits (MSF + EDB)
+│   ├── tools.py          # uniform external-CLI runner (which/run/timeout)
+│   ├── webenum.py        # vulnscan phase: whatweb/nuclei/gobuster/nikto -> findings
+│   ├── bruteforce.py     # bruteforce phase: hydra credential attacks -> findings
 │   ├── executor.py       # msfrpc: run exploit/aux/login vectors, adaptive loop
 │   ├── postexp.py        # post-exploitation: whoami, privesc, loot after a shell
 │   ├── interactive.py    # interactive bridge to a live session
@@ -219,6 +256,8 @@ Siber-ShellCracker/
 | Python 3.12+ | with `python-nmap`, `pymetasploit3`, `PyYAML` |
 | nmap, searchsploit | standard on Kali |
 | Metasploit Framework | `msfconsole`, `msfrpcd`, `msfvenom` |
+| Web tools *(optional)* | `whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto` — power the vulnscan phase; skipped if absent |
+| Cred tools *(optional)* | `hydra` (bruteforce phase), `john`/`hashcat` (offline hash cracking); skipped if absent |
 | Linux + root | nmap `-sV` and `msfrpcd` run best as root |
 | Lab network access | a reachable target you are authorized to test |
 
@@ -258,7 +297,8 @@ Sistem aciliyor      Hosgeldiniz
     LHOST: 192.168.56.1  (otomatik)
 
 ═══[ KESIF ]═══ ...
-═══[ ESLESTIRME ]═══ ...
+═══[ PROFIL ]═══ ...
+═══[ STRATEJI ]═══ ...
 ═══[ SOMURU ]═══ ...
 
   ╔══════════════════════════════════════╗

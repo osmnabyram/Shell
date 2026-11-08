@@ -38,12 +38,29 @@ recon:
   os_detection: false        # append -O for an OS-family guess (needs root)
   default_scripts: false     # append -sC (nmap default NSE scripts)
 
+# Active web attack-surface recon (the "vulnscan" phase). Drives external CLI
+# tools against the target's web services and feeds what they find back into
+# the attack plan (a fingerprinted product -> its exploits get injected).
+# Every tool is optional: whatever is not installed is skipped, not fatal.
+webenum:
+  enabled: true
+  whatweb: true              # technology/product fingerprinting
+  nuclei: true               # template-based CVE / misconfig / exposure scan
+  dirscan: true              # gobuster (preferred) or ffuf content discovery
+  nikto: false               # classic web-server scan (slow -> opt-in)
+  max_targets: 3             # at most this many web services scanned
+  timeout: 300               # per-tool wall-clock limit (seconds)
+  nuclei_severity: "low,medium,high,critical"
+  wordlist: /usr/share/wordlists/dirb/common.txt   # used by gobuster/ffuf
+
 # Autonomous attack engine. The strategy builds a scored, phased plan from the
 # target profile and runs it adaptively (findings feed back into the plan).
 strategy:
   # Phase order. Cheap/safe intel first, loud actions last. Remove a phase to
   # skip it entirely (e.g. drop "credentials" to never try default logins).
-  phases: [enumerate, exploit, credentials, misconfig]
+  #   vulnscan   - active external-tool web pass (see the webenum section)
+  #   bruteforce - hydra credential attacks (see the bruteforce section)
+  phases: [enumerate, vulnscan, bruteforce, exploit, credentials, misconfig]
   stop_on_first_shell: true  # stop the whole run once a session is verified
   allow_dangerous: false     # allow crash-prone exploits (BlueKeep, etc.) + live privesc
 
@@ -70,6 +87,22 @@ strategy:
     extra_users: []          # added on top of the built-in user list
     extra_passwords: []      # added on top of the built-in password list
 
+# Hydra credential brute-force (the "bruteforce" phase). Heavier than the MSF
+# login scanners above: wordlist-driven, and a hit is tried straight back
+# through the MSF login module to drop a session. Skipped if hydra is absent.
+bruteforce:
+  enabled: true
+  tasks: 8                   # hydra -t parallelism (kept modest, not a flood)
+  timeout: 300               # per-service wall-clock limit (seconds)
+  max_services: 6            # at most this many login services attacked
+  stop_on_first_valid: true  # hydra -f: stop a service after the first valid pair
+  # Optional external wordlists. When unset, the built-in user/password lists
+  # (plus any strategy.credentials.extra_* below) are used.
+  user_wordlist:             # e.g. /usr/share/wordlists/seclists/.../users.txt
+  pass_wordlist:             # e.g. /usr/share/wordlists/rockyou.txt
+  extra_users: []
+  extra_passwords: []
+
 # Post-exploitation triage, run automatically once a session is verified.
 # Conservative by default: it enumerates and suggests, it does not fire local
 # exploits unless auto_escalate + strategy.allow_dangerous are both on.
@@ -79,6 +112,9 @@ post_exploitation:
   privesc_suggester: true    # run post/multi/recon/local_exploit_suggester (meterpreter)
   auto_escalate: true        # meterpreter getsystem; live kernel exploits still need
                              # strategy.allow_dangerous=true
+  crack_hashes: true         # offline-crack looted hashes with john (or hashcat)
+  crack_wordlist: /usr/share/wordlists/rockyou.txt
+  crack_timeout: 240         # seconds spent cracking before giving up
 
 searchsploit:
   enabled: true              # include Exploit-DB matches in the report (informational)

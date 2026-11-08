@@ -393,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         for cat in profile.categories():
             ports = ", ".join(str(s.port) for s in profile.categorized[cat])
-            print(C.info(f"    • {cat:<10}") + C.dim(f" → port {ports}"))
+            print(C.info(f"    - {cat:<10}") + C.dim(f" -> port {ports}"))
 
         # --- 3. CONNECT (auto-start msfrpcd if needed) ---------------------
         msf_cfg = config.get("msfrpc", {})
@@ -431,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             C.style("[*] ", "info")
             + C.style(str(len(plan)), "bold", "info")
-            + C.info(" saldiri vektoru planlandi (faz sirasi: kesif → exploit → kimlik → misconfig).")
+            + C.info(" saldiri vektoru planlandi (faz sirasi: kesif -> vulnscan -> exploit -> kimlik -> misconfig).")
         )
         for ph in strat.PHASES:
             pend = plan.pending(ph)
@@ -470,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
                 if pe.get("escalated"):
                     print(C.style("    Yetki: ", "bold") + C.ok("getsystem ile yukseltildi"))
                 for sug in (pe.get("privesc_suggestions") or [])[:5]:
-                    print(C.info("    privesc → ") + C.dim(sug))
+                    print(C.info("    privesc -> ") + C.dim(sug))
                 loot = [k for k, v in (pe.get("loot") or {}).items()
                         if v and not str(v).startswith("[hata")]
                 if loot:
@@ -489,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                     LOG.warning("Terminal penceresi acilamadi; bu pencerede baglaniliyor.")
                     the_executor.interact(sid)
         else:
-            print(C.style("\n  ✗ Shell alinamadi. Tum adaylar denendi.", "bold", "warn"))
+            print(C.style("\n  [-] Shell alinamadi. Tum adaylar denendi.", "bold", "warn"))
 
     except execmod.MsfConnectionError as exc:
         LOG.error("%s", exc)

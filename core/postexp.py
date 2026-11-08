@@ -22,9 +22,14 @@ can crash the target. The goal is a thorough, safe triage — not a smash-and-gr
 from __future__ import annotations
 
 import logging
+import os
+import re
+import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+from . import tools
 
 logger = logging.getLogger("ShellCracker.postexp")
 
@@ -84,6 +89,10 @@ class PostExploiter:
         self.do_loot = bool(cfg.get("loot", True))
         self.do_suggester = bool(cfg.get("privesc_suggester", True))
         self.auto_escalate = bool(cfg.get("auto_escalate", True))
+        self.crack_hashes = bool(cfg.get("crack_hashes", True))
+        self.crack_wordlist = str(cfg.get("crack_wordlist",
+                                          "/usr/share/wordlists/rockyou.txt"))
+        self.crack_timeout = int(cfg.get("crack_timeout", 240))
         self.allow_dangerous = bool(
             (config or {}).get("strategy", {}).get("allow_dangerous", False)
         )
@@ -188,6 +197,85 @@ class PostExploiter:
             out.append("Yazilabilir cron dosyasi -> zamanlanmis gorev ile root.")
         return out
 
+    # -- offline hash cracking ----------------------------------------------
+    @staticmethod
+    def _parse_john_show(text: str) -> list[tuple[str, str]]:
+        """Parse ``john --show`` output into (user, password) pairs."""
+        pairs: list[tuple[str, str]] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            if re.search(r"password hash(es)? cracked", line, re.I):
+                continue
+            parts = line.split(":")
+            if len(parts) >= 2 and parts[0]:
+                pairs.append((parts[0], parts[1]))
+        return pairs
+
+    def _crack_hashes(self, result: PostExpResult, profile: Any = None) -> None:
+        """Hand looted hashes to john (or hashcat) and record anything cracked.
+
+        Operates only on hashes already looted from this single host. Skipped
+        unless a cracker and the wordlist are present; bounded by crack_timeout.
+        """
+        blobs = [result.loot.get("hashdump", ""), result.loot.get("shadow", "")]
+        raw = "\n".join(b for b in blobs
+                        if b and not str(b).startswith("[hata"))
+        raw = "\n".join(ln for ln in raw.splitlines() if ":" in ln and ln.strip())
+        if not raw.strip():
+            return
+        if not tools.have("john") and not tools.have("hashcat"):
+            result.notes.append("Hash kirma atlandi: john/hashcat kurulu degil.")
+            return
+        if not os.path.exists(self.crack_wordlist):
+            result.notes.append(
+                f"Hash kirma atlandi: wordlist yok ({self.crack_wordlist}).")
+            return
+
+        fd, hpath = tempfile.mkstemp(prefix="sc_hashes_", suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(raw + "\n")
+        cracked: list[tuple[str, str]] = []
+        try:
+            if tools.have("john"):
+                tools.run(["john", f"--wordlist={self.crack_wordlist}", hpath],
+                          timeout=self.crack_timeout)
+                show = tools.run(["john", "--show", hpath], timeout=30)
+                cracked = self._parse_john_show(show.text) if show.ok else []
+            else:  # hashcat fallback: NT hashes (mode 1000) from a pwdump blob
+                nt = [ln.split(":")[3] for ln in raw.splitlines()
+                      if len(ln.split(":")) >= 4 and ln.split(":")[3]]
+                if nt:
+                    fd2, npath = tempfile.mkstemp(prefix="sc_nt_", suffix=".txt")
+                    with os.fdopen(fd2, "w", encoding="utf-8") as fh:
+                        fh.write("\n".join(nt) + "\n")
+                    tools.run(["hashcat", "-m", "1000", "-a", "0",
+                               "--potfile-disable", npath, self.crack_wordlist],
+                              timeout=self.crack_timeout)
+                    show = tools.run(["hashcat", "-m", "1000", "--show", npath],
+                                     timeout=30)
+                    cracked = [("?", ln.split(":")[-1])
+                               for ln in show.text.splitlines() if ":" in ln]
+                    try:
+                        os.remove(npath)
+                    except OSError:
+                        pass
+        finally:
+            try:
+                os.remove(hpath)
+            except OSError:
+                pass
+
+        cracked = [(u, p) for u, p in cracked if p]
+        if cracked:
+            result.loot["cracked"] = "\n".join(f"{u}:{p}" for u, p in cracked)
+            result.notes.append(f"{len(cracked)} parola kirildi (offline).")
+            for u, p in cracked:
+                logger.info("  kirildi: %s:%s", u, p)
+                if profile is not None:
+                    profile.add_credential("os", 0, u, p)
+
     # -- main entry ----------------------------------------------------------
     def run(self, sid: int, session_type: str, profile: Any = None) -> PostExpResult:
         """Triage session ``sid`` and return a :class:`PostExpResult`."""
@@ -254,6 +342,13 @@ class PostExploiter:
                     result.commands_run.append("cat /etc/passwd")
 
             result.privesc_suggestions = self._suggest_linux(result.loot)
+
+        # Offline-crack whatever hashes we looted (NT from hashdump, unix shadow).
+        if self.crack_hashes and self.do_loot:
+            try:
+                self._crack_hashes(result, profile)
+            except Exception as exc:  # noqa: BLE001 - cracking must never break triage
+                logger.debug("hash kirma hatasi: %s", exc)
 
         if profile is not None:
             profile.add_fact("foothold", {

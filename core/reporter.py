@@ -128,7 +128,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
     if not report["attempts"]:
         lines.append("_Hic exploit denemesi yapilmadi._")
     for i, a in enumerate(report["attempts"], start=1):
-        status = "✅ BASARILI" if a["success"] else "❌ basarisiz"
+        status = "[+] BASARILI" if a["success"] else "[-] basarisiz"
         kind = a.get("kind", "exploit")
         prefix = "exploit" if kind == "exploit" else "auxiliary"
         lines += [

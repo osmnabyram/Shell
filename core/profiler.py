@@ -56,14 +56,26 @@ _CATEGORY_NAMES: dict[str, set[str]] = {
     "java-rmi": {"java-rmi", "rmiregistry"},
     "ajp": {"ajp13", "ajp"},
     "distcc": {"distccd", "distcc"},
+    "winrm": {"wsman", "winrm", "wsmans"},
+    "rsync": {"rsync"},
+    "elasticsearch": {"elasticsearch"},
+    "couchdb": {"couchdb"},
+    "memcached": {"memcached"},
+    "docker": {"docker"},
 }
 # Fallback: keyword in product/extrainfo -> category, when the service name is
 # generic (e.g. "tcpwrapped" or an unrecognised banner).
 _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("web", ("apache", "nginx", "iis", "tomcat", "jetty", "lighttpd", "httpd",
-             "werkzeug", "node.js", "php", "wordpress", "drupal", "joomla")),
+             "werkzeug", "node.js", "php", "wordpress", "drupal", "joomla",
+             "jenkins", "jboss", "struts", "confluence", "grafana")),
     ("smb", ("samba", "cifs")),
-    ("database", ("mariadb", "couchdb", "memcached", "elasticsearch")),
+    ("mysql", ("mariadb",)),
+    ("elasticsearch", ("elasticsearch",)),
+    ("couchdb", ("couchdb",)),
+    ("memcached", ("memcached",)),
+    ("docker", ("docker",)),
+    ("winrm", ("winrm",)),
 ]
 
 # Service categories most likely to hand over a shell / high-value foothold get
@@ -71,10 +83,13 @@ _CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 CATEGORY_WEIGHT: dict[str, int] = {
     "smb": 26, "ftp": 24, "web": 22, "telnet": 21, "rservices": 22,
     "mysql": 20, "mssql": 20, "postgres": 20, "rdp": 20, "vnc": 20,
-    "java-rmi": 22, "irc": 20, "distcc": 22, "ajp": 18,
+    "java-rmi": 22, "irc": 20, "distcc": 22, "ajp": 20,
     "ssh": 18, "redis": 19, "mongodb": 18, "oracle": 18,
     "rpc": 16, "snmp": 16, "smtp": 14, "pop3": 12, "imap": 12,
     "finger": 12, "dns": 8, "database": 18, "other": 8,
+    # newer high-value categories
+    "winrm": 22, "docker": 24, "elasticsearch": 20, "couchdb": 20,
+    "memcached": 14, "rsync": 16,
 }
 
 # --- OS inference signals ---------------------------------------------------
