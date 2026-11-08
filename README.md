@@ -313,6 +313,12 @@ Prefer to do it by hand? `pip install -r requirements.txt` for the Python deps,
 then `python3 shell.py --check` to see which external tools are missing and
 `sudo python3 shell.py --kur` to install them.
 
+**Just cloned and ran it?** On first run ShellCracker bootstraps itself: it
+auto-installs the missing Python packages (handling Kali's externally-managed
+pip), and if a core tool (nmap / Metasploit) is missing it offers to install it
+before scanning. So `git clone` + `python3 shell.py` is enough to get going.
+Set `SC_NO_AUTOINSTALL=1` to disable the Python auto-install.
+
 Defaults work out of the box for a local lab: `handler.lhost` is `auto`
 (detected from the route to the target) and `msfrpcd` is auto-started with the
 user/password/port in `config.yaml` (default `msf` / `msf` / `55553`).

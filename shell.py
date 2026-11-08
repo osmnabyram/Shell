@@ -16,17 +16,67 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import logging
+import os
 import signal
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-import yaml
 
-from core import colors as C
-from core import executor as execmod
-from core import matcher, profiler, recon, reporter
-from core import strategy as strat
+def _ensure_python_deps() -> None:
+    """Install the Python dependencies on first run if they are missing.
+
+    A newcomer who just ``git clone``s and runs ``python3 shell.py`` has not
+    run ``pip install`` yet, so the very first ``import nmap`` would crash with
+    a bare traceback. Instead we detect the missing packages and install them
+    from requirements.txt automatically (handling PEP-668 externally-managed
+    environments), so the tool bootstraps itself. Set SC_NO_AUTOINSTALL=1 to
+    turn this off.
+    """
+    if os.environ.get("SC_NO_AUTOINSTALL") == "1":
+        return
+    needed = {"yaml": "PyYAML", "nmap": "python-nmap",
+              "pymetasploit3": "pymetasploit3"}
+    missing = []
+    for mod in needed:
+        try:
+            __import__(mod)
+        except ImportError:
+            missing.append(mod)
+    if not missing:
+        return
+
+    print(f"[*] Eksik Python paketleri kuruluyor: "
+          f"{', '.join(needed[m] for m in missing)} ...", flush=True)
+    req = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "requirements.txt")
+    base = [sys.executable, "-m", "pip", "install"]
+    cmd = base + (["-r", req] if os.path.exists(req)
+                  else [needed[m] for m in missing])
+    rc = subprocess.run(cmd).returncode
+    if rc != 0:  # PEP-668 (Kali/Debian) blocks system pip -> retry with override
+        print("[*] Harici-yonetilen ortam; --break-system-packages ile deneniyor ...",
+              flush=True)
+        subprocess.run(cmd + ["--break-system-packages"])
+    # Verify; if still missing, tell the user exactly what to run and stop.
+    for mod in missing:
+        try:
+            __import__(mod)
+        except ImportError:
+            print(f"[!] '{needed[mod]}' hala kurulamadi. Elle calistir:\n"
+                  f"    pip install -r requirements.txt", file=sys.stderr)
+            sys.exit(3)
+
+
+_ensure_python_deps()
+
+import yaml  # noqa: E402 - imported after the dependency bootstrap above
+
+from core import colors as C  # noqa: E402
+from core import executor as execmod  # noqa: E402
+from core import matcher, profiler, recon, reporter  # noqa: E402
+from core import strategy as strat  # noqa: E402
 
 LOG = logging.getLogger("ShellCracker")
 
@@ -359,6 +409,15 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     reports_dir = Path("reports")
     setup_logging(args.target, reports_dir, to_file=args.rapor)
+
+    # First-run guard: if core tools are missing, offer to install them so a
+    # fresh clone just works for someone who only ran `git clone`.
+    try:
+        from core import doctor
+
+        doctor.ensure_ready(assume_yes=args.assume_yes)
+    except Exception as exc:  # noqa: BLE001 - never let the guard block a run
+        LOG.debug("bagimlilik kontrolu atlandi: %s", exc)
 
     print(C.style("    Hedef: ", "bold") + C.style(args.target, "bold", "ok"))
 

@@ -170,6 +170,48 @@ def report() -> int:
     return len(miss)
 
 
+def ensure_ready(assume_yes: bool = False) -> None:
+    """First-run guard: offer to install missing CORE tools before a scan.
+
+    Called at the start of a normal run. If a required tool (nmap, Metasploit)
+    is missing it offers to install everything that is missing -- so a user who
+    only cloned the repo still ends up with a working tool. Missing *optional*
+    tools are reduced to a single hint, never a prompt. Stays silent when the
+    box is ready, and never prompts when stdin is not a TTY (just warns).
+    """
+    req_missing = missing_tools(required_only=True)
+    opt_missing = [t for t in missing_tools() if not t.required]
+
+    if not req_missing:
+        if opt_missing:
+            names = ", ".join(t.name for t in opt_missing)
+            print(C.dim(f"  [i] Opsiyonel arac eksik ({names}); ilgili faz "
+                        "atlanir. Kurmak icin: python3 shell.py --kur"))
+        return
+
+    names = ", ".join(t.name for t in req_missing)
+    print(C.err(f"\n  [!] Cekirdek arac(lar) eksik: {names}"))
+    print(C.dim("      Bunlar olmadan tarama/exploit calismaz."))
+
+    if not sys.stdin.isatty() and not assume_yes:
+        print(C.warn("      Kurmak icin: sudo python3 shell.py --kur"))
+        return
+    if not have_apt():
+        print(C.warn("      apt yok; elle kur: "
+                     + ", ".join(sorted({t.package for t in req_missing}))))
+        return
+
+    if not assume_yes:
+        try:
+            ans = input(C.warn("      Simdi kurulsun mu? [E/h] ")).strip().lower()
+        except EOFError:
+            ans = "h"
+        if ans in ("h", "hayir", "n", "no"):
+            print(C.dim("      Atlandi. Daha sonra: sudo python3 shell.py --kur"))
+            return
+    install_missing(assume_yes=True)
+
+
 def install_missing(assume_yes: bool = False) -> int:
     """Install the missing tools via apt (and pip for Python deps).
 
