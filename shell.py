@@ -392,6 +392,17 @@ def main(argv: list[str] | None = None) -> int:
 
     _startup()  # clear + loading animation + welcome (skipped if not a TTY)
 
+    # First-run guard (BEFORE asking for a target): if core tools are missing,
+    # offer to install them so a fresh clone just works for someone who only
+    # ran `git clone`. Checks what is installed, installs what is missing, then
+    # the run proceeds to the target prompt and scan.
+    try:
+        from core import doctor
+
+        doctor.ensure_ready(assume_yes=args.assume_yes)
+    except Exception as exc:  # noqa: BLE001 - never let the guard block a run
+        LOG.debug("bagimlilik kontrolu atlandi: %s", exc)
+
     # Resolve the target: from --target if given (validated here), otherwise ask.
     if args.target:
         _print_banner()
@@ -409,15 +420,6 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     reports_dir = Path("reports")
     setup_logging(args.target, reports_dir, to_file=args.rapor)
-
-    # First-run guard: if core tools are missing, offer to install them so a
-    # fresh clone just works for someone who only ran `git clone`.
-    try:
-        from core import doctor
-
-        doctor.ensure_ready(assume_yes=args.assume_yes)
-    except Exception as exc:  # noqa: BLE001 - never let the guard block a run
-        LOG.debug("bagimlilik kontrolu atlandi: %s", exc)
 
     print(C.style("    Hedef: ", "bold") + C.style(args.target, "bold", "ok"))
 
