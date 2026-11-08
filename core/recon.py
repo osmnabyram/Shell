@@ -26,9 +26,9 @@ logger = logging.getLogger("ShellCracker.recon")
 #   aggressive - all ports, faster timing, exhaustive version probing
 _SCAN_PROFILES: dict[str, str] = {
     "fast": "-sV -Pn -T4 --top-ports 100",
-    "normal": "-sV -Pn",
-    "full": "-sV -Pn -p-",
-    "aggressive": "-sV -Pn -p- -T4 --version-all",
+    "normal": "-sV -Pn -T4",
+    "full": "-sV -Pn -T4 -p-",
+    "aggressive": "-sV -Pn -T4 -p- --version-all",
 }
 
 
@@ -135,7 +135,22 @@ def run_recon(
 
     # python-nmap already requests XML internally; we pass the service-scan
     # flags through the `arguments` parameter. -oX is handled by the library.
-    scanner.scan(hosts=target, arguments=nmap_arguments, timeout=timeout)
+    # A full-port scan can outlast the timeout; don't let that crash the whole
+    # run -- report it clearly with the fix and return an empty result so the
+    # caller exits cleanly.
+    try:
+        scanner.scan(hosts=target, arguments=nmap_arguments, timeout=timeout)
+    except nmap.PortScannerTimeout:
+        logger.warning(
+            "Nmap taramasi %d sn icinde bitmedi (timeout).", timeout)
+        logger.warning(
+            "  Cozum: config.yaml -> recon.scan_profile'i 'fast'/'normal' yap, "
+            "ya da recon.timeout degerini yukselt.")
+        return ReconResult(
+            target=target,
+            started_at=started.isoformat(timespec="seconds"),
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+        )
 
     finished = datetime.now()
     result = ReconResult(

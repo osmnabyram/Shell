@@ -35,14 +35,17 @@ payloads:
 recon:
   # Scan breadth. The default top-1000 silently misses a service on a high
   # port (and with it, maybe your shell), so pick how wide to look:
-  #   fast       - top 100 ports (quick triage)
-  #   normal     - nmap default top 1000 + version detection
-  #   full       - ALL 65535 TCP ports (recommended for a real pentest)
-  #   aggressive - all ports, faster timing, exhaustive version probing
-  scan_profile: full
+  #   fast       - top 100 ports (quick triage, ~seconds)
+  #   normal     - top 1000 ports + version detection (good default, ~1-2 min)
+  #   full       - ALL 65535 TCP ports (thorough, but SLOW: raise timeout!)
+  #   aggressive - all ports, exhaustive version probing (slowest)
+  # NOTE: 'full'/'aggressive' can take many minutes; if the scan hits the
+  # timeout below it is reported and the run exits cleanly (no crash). For a
+  # deep pentest use 'full' AND raise timeout (e.g. 1800+).
+  scan_profile: normal
   # Set nmap_arguments to override the profile entirely with your own flags.
   # nmap_arguments: "-sV -Pn"   # -oX is added automatically for XML parsing
-  timeout: 600               # seconds (raise for full/aggressive on slow links)
+  timeout: 600               # seconds (raise to 1800+ for full/aggressive)
   os_detection: false        # append -O for an OS-family guess (needs root)
   default_scripts: false     # append -sC (nmap default NSE scripts)
   udp_scan: false            # also scan common UDP services (needs root, slow)
