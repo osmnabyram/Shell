@@ -347,6 +347,72 @@ _KNOWN_EXPLOITS: list[dict[str, Any]] = [
          dangerous=True, note="BlueKeep RCE (RISKLI: hedefi cokertebilir)"),
 ]
 
+# --- CVE -> exploit map (for NSE-confirmed vulnerabilities) -------------------
+# When the NSE vuln/vulners scan reports a host as VULNERABLE to one of these
+# CVEs, the exact Metasploit module is injected at a high score -- an nmap
+# finding becomes a ready-to-fire exploit without relying on version matching.
+# Only CVEs with a reliable RCE module are listed; anything else is kept as an
+# informational fact. ``default_port`` is used when the finding carries none.
+_CVE_EXPLOITS: dict[str, dict[str, Any]] = {
+    "CVE-2017-0143": dict(module="windows/smb/ms17_010_eternalblue",
+                          category="smb", default_port=445, rank="great",
+                          note="MS17-010 EternalBlue"),
+    "CVE-2017-0144": dict(module="windows/smb/ms17_010_eternalblue",
+                          category="smb", default_port=445, rank="great",
+                          note="MS17-010 EternalBlue"),
+    "CVE-2017-0145": dict(module="windows/smb/ms17_010_eternalblue",
+                          category="smb", default_port=445, rank="great",
+                          note="MS17-010 EternalBlue"),
+    "CVE-2008-4250": dict(module="windows/smb/ms08_067_netapi",
+                          category="smb", default_port=445, rank="great",
+                          note="MS08-067 netapi"),
+    "CVE-2011-2523": dict(module="unix/ftp/vsftpd_234_backdoor",
+                          category="ftp", default_port=21, rank="excellent",
+                          note="vsftpd 2.3.4 arka kapisi"),
+    "CVE-2010-2075": dict(module="unix/irc/unreal_ircd_3281_backdoor",
+                          category="irc", default_port=6667, rank="excellent",
+                          note="UnrealIRCd 3.2.8.1 arka kapisi"),
+    "CVE-2007-2447": dict(module="multi/samba/usermap_script",
+                          category="smb", default_port=445, rank="excellent",
+                          note="Samba usermap_script"),
+    "CVE-2014-6271": dict(module="multi/http/apache_mod_cgi_bash_env_exec",
+                          category="web", default_port=80, rank="excellent",
+                          note="Shellshock"),
+    "CVE-2012-1823": dict(module="multi/http/php_cgi_arg_injection",
+                          category="web", default_port=80, rank="excellent",
+                          note="PHP-CGI arg injection"),
+    "CVE-2018-7600": dict(module="unix/webapp/drupal_drupalgeddon2",
+                          category="web", default_port=80, rank="excellent",
+                          note="Drupalgeddon2"),
+    "CVE-2017-5638": dict(module="multi/http/struts2_content_type_ognl",
+                          category="web", default_port=80, rank="excellent",
+                          note="Apache Struts2 S2-045"),
+    "CVE-2018-11776": dict(module="multi/http/struts2_namespace_ognl",
+                           category="web", default_port=80, rank="great",
+                           note="Apache Struts2 S2-057"),
+    "CVE-2017-12617": dict(module="multi/http/tomcat_jsp_upload_bypass",
+                           category="web", default_port=8080, rank="excellent",
+                           note="Tomcat PUT JSP yukleme"),
+    "CVE-2017-12636": dict(module="linux/http/apache_couchdb_cmd_exec",
+                           category="couchdb", default_port=5984, rank="excellent",
+                           note="CouchDB komut calistirma"),
+    "CVE-2015-1427": dict(module="multi/elasticsearch/search_groovy_script",
+                          category="elasticsearch", default_port=9200, rank="excellent",
+                          note="Elasticsearch Groovy RCE"),
+    "CVE-2021-26084": dict(module="multi/http/atlassian_confluence_webwork_ognl_injection",
+                           category="web", default_port=8090, rank="excellent",
+                           note="Confluence OGNL RCE"),
+    "CVE-2021-41773": dict(module="multi/http/apache_normalize_path_rce",
+                           category="web", default_port=80, rank="great",
+                           note="Apache 2.4.49/50 path traversal RCE"),
+    "CVE-2019-15107": dict(module="unix/webapp/webmin_backdoor",
+                           category="web", default_port=10000, rank="excellent",
+                           note="Webmin RCE"),
+    "CVE-2014-3120": dict(module="multi/elasticsearch/script_mvel_rce",
+                          category="elasticsearch", default_port=9200, rank="excellent",
+                          note="Elasticsearch MVEL RCE"),
+}
+
 # --- Built-in credential lists (small: default-cred checks, not brute force) --
 _COMMON_USERS = [
     "root", "admin", "administrator", "user", "guest", "msfadmin",
@@ -701,6 +767,48 @@ class StrategyEngine:
                 self._add_version_exploits(f.category, svc)
                 if len(self.plan) > before:
                     new.extend(self.plan.all()[before:])
+                if f.detail:
+                    self.profile.notes.append(f.detail)
+
+            elif f.key == "cve":
+                # NSE confirmed a CVE: inject (or boost) its exact exploit.
+                cve = str(f.value).upper()
+                self.profile.add_fact("cve", [cve])
+                spec = _CVE_EXPLOITS.get(cve)
+                if spec:
+                    module = spec["module"]
+                    port = f.port or spec.get("default_port", 0)
+                    if not self.plan.boost(module, 200, f"NSE: {cve} ZAFIYETLI"):
+                        opts = {"RHOSTS": self.profile.target}
+                        if port:
+                            opts["RPORT"] = port
+                        v = AttackVector(
+                            phase="exploit", kind="exploit", module=module,
+                            module_type="exploit",
+                            category=spec.get("category", f.category),
+                            service_port=port, service_name=f.category,
+                            rationale=f"NSE {cve} zafiyetli -> {spec.get('note', module)}",
+                            source="adaptive", score=360, options=opts,
+                        )
+                        if self.plan.add(v):
+                            new.append(v)
+                if f.detail:
+                    self.profile.notes.append(f.detail)
+
+            elif f.key == "smb.users":
+                # Enumerated usernames (netexec/NSE): remember them and feed
+                # them into every login module so brute/credential tries them.
+                users = [u for u in (f.value or []) if u]
+                self.profile.add_fact("smb.users", users)
+                for cat, module in _LOGIN_MODULES.items():
+                    for svc in self.profile.categorized.get(cat, []):
+                        v = self.plan.find(module, svc.port)
+                        if not v:
+                            continue
+                        bucket = v.options.setdefault("_users", [])
+                        for u in users:
+                            if u not in bucket:
+                                bucket.append(u)
                 if f.detail:
                     self.profile.notes.append(f.detail)
 

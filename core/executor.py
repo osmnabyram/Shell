@@ -682,32 +682,111 @@ class Executor:
         return records
 
     def _run_vulnscan(self, engine: StrategyEngine, records: list[AttemptRecord]) -> None:
-        """Active external-tool web/vuln scan; feed findings back into the plan.
+        """Active external-tool vuln / attack-surface scan feeding the plan.
 
-        Runs the web-enum tool suite (whatweb / nuclei / gobuster|ffuf / nikto)
-        against the target's web services and passes every finding to
-        ``engine.incorporate`` -- so a product fingerprinted here (Drupal,
-        Tomcat, Struts, ...) is turned into knowledge-base and version-matched
-        exploit vectors before the exploit phase runs. Any tool that is not
-        installed is skipped; a tool error never stops the run.
+        Three independent intel passes, each optional and each fed back through
+        ``engine.incorporate`` so what it finds becomes scored exploit vectors
+        *before* the exploit phase runs:
+
+          * NSE  -- ``nmap --script vuln,vulners`` -> confirmed CVEs / MS17-010
+                    turned into their exact Metasploit modules;
+          * SMB  -- netexec null-session shares, RID user enumeration, and any
+                    anonymous/``Pwn3d!`` credential -> psexec shell path;
+          * web  -- whatweb / nuclei / gobuster|ffuf / nikto fingerprints.
+
+        Any tool that is not installed is skipped; a tool error never stops the
+        run. One ``incorporate`` call at the end widens the exploit phase.
         """
+        all_findings: list[Finding] = []
+        all_findings += self._nse_scan(engine, records)
+        all_findings += self._smb_enum(engine, records)
+        all_findings += self._web_enum(engine, records)
+
+        if all_findings:
+            new_vectors = engine.incorporate(all_findings)
+            for nv in new_vectors:
+                logger.info("  +vulnscan->plan: %s (skor=%.0f) — %s",
+                            nv.module, nv.score, nv.rationale)
+            logger.info("vulnscan: toplam %d bulgu, plana %d yeni vektor eklendi.",
+                        len(all_findings), len(new_vectors))
+        else:
+            logger.info("vulnscan: bulgu yok (araclar kurulu degil ya da temiz).")
+
+    def _nse_scan(self, engine: StrategyEngine, records: list[AttemptRecord]) -> list[Finding]:
+        """nmap NSE vuln/vulners pass over the open ports; return findings."""
+        cfg = self.config.get("nse", {}) or {}
+        if not cfg.get("enabled", True):
+            return []
+        try:
+            from .nse import NseScanner
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("NSE atlandi (yuklenemedi): %s", exc)
+            return []
+        scanner = NseScanner(self.target, self.config)
+        if not scanner.tool_status():
+            return []
+        started = datetime.now().isoformat(timespec="seconds")
+        try:
+            findings = scanner.scan(engine.profile.services)
+        except Exception as exc:  # noqa: BLE001 - a tool must never break the run
+            logger.warning("  NSE hatasi: %s", exc)
+            findings = []
+        rec = AttemptRecord(
+            module="nse/vuln", kind="vulnscan", phase="vulnscan",
+            started_at=started,
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            fired=True, reason=f"{len(findings)} NSE bulgusu",
+        )
+        rec.findings = [f"{f.key}={f.value}" for f in findings][:60]
+        records.append(rec)
+        return findings
+
+    def _smb_enum(self, engine: StrategyEngine, records: list[AttemptRecord]) -> list[Finding]:
+        """netexec SMB/AD enumeration pass; return findings."""
+        cfg = self.config.get("smbenum", {}) or {}
+        if not cfg.get("enabled", True):
+            return []
+        try:
+            from .smbenum import SmbEnumRunner
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("smbenum atlandi (yuklenemedi): %s", exc)
+            return []
+        runner = SmbEnumRunner(self.target, self.config)
+        if not runner.tool_status():
+            return []
+        started = datetime.now().isoformat(timespec="seconds")
+        try:
+            findings = runner.scan(engine.profile.services)
+        except Exception as exc:  # noqa: BLE001 - a tool must never break the run
+            logger.warning("  SMB/AD keşfi hatasi: %s", exc)
+            findings = []
+        rec = AttemptRecord(
+            module="netexec/smb", kind="vulnscan", phase="vulnscan",
+            started_at=started,
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            fired=True, reason=f"{len(findings)} SMB bulgusu",
+        )
+        rec.findings = [f"{f.key}={f.value}" for f in findings][:60]
+        records.append(rec)
+        return findings
+
+    def _web_enum(self, engine: StrategyEngine, records: list[AttemptRecord]) -> list[Finding]:
+        """whatweb / nuclei / dirscan / nikto over the web services; return findings."""
         cfg = self.config.get("webenum", {}) or {}
         if not cfg.get("enabled", True):
-            logger.info("vulnscan kapali (webenum.enabled=false).")
-            return
+            return []
         web_svcs = engine.profile.categorized.get("web", [])
         if not web_svcs:
-            logger.info("vulnscan: web servisi yok, atlaniyor.")
-            return
+            return []
         try:
             from .webenum import WebEnumRunner
         except Exception as exc:  # noqa: BLE001
-            logger.warning("vulnscan atlandi (webenum yuklenemedi): %s", exc)
-            return
+            logger.warning("web keşfi atlandi (webenum yuklenemedi): %s", exc)
+            return []
 
         runner = WebEnumRunner(self.target, self.config)
         status = runner.tool_status()
-        logger.info("vulnscan araclari -> %s",
+        logger.info("web keşfi araclari -> %s",
                     ", ".join(f"{t}:{'VAR' if ok else 'yok'}"
                               for t, ok in status.items()))
 
@@ -729,16 +808,7 @@ class Executor:
             )
             rec.findings = [f"{f.key}={f.value}" for f in findings][:60]
             records.append(rec)
-
-        if all_findings:
-            new_vectors = engine.incorporate(all_findings)
-            for nv in new_vectors:
-                logger.info("  +vulnscan->plan: %s (skor=%.0f) — %s",
-                            nv.module, nv.score, nv.rationale)
-            logger.info("vulnscan: %d bulgu, plana %d yeni vektor eklendi.",
-                        len(all_findings), len(new_vectors))
-        else:
-            logger.info("vulnscan: bulgu yok (araclar kurulu degil ya da temiz).")
+        return all_findings
 
     def _run_bruteforce(self, engine: StrategyEngine, records: list[AttemptRecord]) -> bool:
         """Hydra credential attacks; feed creds back and try for a direct shell.

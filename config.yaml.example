@@ -38,10 +38,31 @@ recon:
   os_detection: false        # append -O for an OS-family guess (needs root)
   default_scripts: false     # append -sC (nmap default NSE scripts)
 
-# Active web attack-surface recon (the "vulnscan" phase). Drives external CLI
-# tools against the target's web services and feeds what they find back into
-# the attack plan (a fingerprinted product -> its exploits get injected).
-# Every tool is optional: whatever is not installed is skipped, not fatal.
+# nmap NSE vulnerability scan (part of the "vulnscan" phase). Runs the nmap
+# vuln scripts over the discovered open ports; a host confirmed VULNERABLE to a
+# known CVE (e.g. MS17-010) has the exact Metasploit module injected at a high
+# score before the exploit phase. Needs only nmap, which is already required.
+nse:
+  enabled: true
+  scripts: "vuln,vulners"    # nmap --script argument (vulners adds CVE mapping)
+  timeout: 600               # NSE scripts are slower than a service scan
+  extra_args: ""             # optional extra nmap flags (space-separated)
+
+# SMB / Active Directory enumeration with netexec (nxc) -- the fastest path to
+# a Windows shell. Anonymous/guest only here (host fingerprint, null-session
+# shares, RID-brute user list); a found/Pwn3d credential is fed back and unlocks
+# psexec. Password spraying stays in the credential/bruteforce phases. Skipped
+# if no netexec/crackmapexec binary is installed.
+smbenum:
+  enabled: true
+  shares: true               # list shares over a null session
+  rid_brute: true            # enumerate users by cycling RIDs
+  timeout: 300               # per netexec invocation (seconds)
+
+# Active web attack-surface recon (part of the "vulnscan" phase). Drives
+# external CLI tools against the target's web services and feeds what they find
+# back into the attack plan (a fingerprinted product -> its exploits get
+# injected). Every tool is optional: whatever is not installed is skipped.
 webenum:
   enabled: true
   whatweb: true              # technology/product fingerprinting
@@ -58,7 +79,8 @@ webenum:
 strategy:
   # Phase order. Cheap/safe intel first, loud actions last. Remove a phase to
   # skip it entirely (e.g. drop "credentials" to never try default logins).
-  #   vulnscan   - active external-tool web pass (see the webenum section)
+  #   vulnscan   - active external-tool pass: NSE vuln scan + netexec SMB/AD +
+  #                web recon (see the nse / smbenum / webenum sections)
   #   bruteforce - hydra credential attacks (see the bruteforce section)
   phases: [enumerate, vulnscan, bruteforce, exploit, credentials, misconfig]
   stop_on_first_shell: true  # stop the whole run once a session is verified

@@ -38,7 +38,8 @@ already-installed tools for you, logging each step along the way.
 
 It is an orchestration layer with a decision engine on top: it does **not**
 contain or develop exploit code of its own. Reconnaissance is delegated to
-`nmap`, web attack-surface analysis to `whatweb`/`nuclei`/`gobuster`/`nikto`,
+`nmap` (including its NSE vulnerability scripts), SMB/AD enumeration to
+`netexec`, web attack-surface analysis to `whatweb`/`nuclei`/`gobuster`/`nikto`,
 exploit/auxiliary selection to the Metasploit module database and Exploit-DB,
 and every attempt runs through the Metasploit framework over `msfrpc`. What
 ShellCracker adds is the **autonomous strategy** — it profiles
@@ -67,8 +68,10 @@ what it learns as it runs (see [Autonomous engine](#autonomous-engine)).
    every service sorted into a category (web / smb / ftp / ssh / db / ...).
 4. **Vulnerability analysis** — each service is matched against a curated
    knowledge base of high-signal exploits *and* the live Metasploit module DB;
-   web services additionally get an active external-tool pass (`whatweb`,
-   `nuclei`, `gobuster`/`ffuf`, `nikto`) whose findings widen the plan.
+   on top of that an active external-tool pass runs: `nmap` NSE vuln scripts
+   (a confirmed CVE becomes its exact exploit), `netexec` SMB/AD enumeration,
+   and web tooling (`whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto`) — all of
+   it feeding findings back to widen the plan.
 5. **Strategy** — the brain walks a broad per-category decision tree and builds
    a **scored, phased attack plan** covering every avenue it can see.
 6. **Execute** — the plan runs phase by phase and **adapts**: enumeration and
@@ -99,7 +102,7 @@ adaptively and, on success, hands off to [`postexp`](core/postexp.py).
 | Phase | What it does | Example modules / tools |
 |---|---|---|
 | **enumerate** | low-risk intel gathering; feeds the feedback loop | `smb_version`, `smb_ms17_010`, `ftp/anonymous`, `http_header`, `smtp_enum`, `snmp_enum`, `nfsmount` |
-| **vulnscan** | active external-tool web pass; findings widen the plan | `whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto` |
+| **vulnscan** | active external-tool pass (NSE vuln scan + SMB/AD enum + web); findings widen the plan | `nmap --script vuln,vulners`, `netexec` (nxc), `whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto` |
 | **bruteforce** | wordlist credential attacks; a hit is tried straight into a session | `hydra` (ssh/ftp/smb/mysql/mssql/postgres/rdp/vnc/telnet/…) |
 | **exploit** | knowledge-base + version-matched MSF exploits, behind a reverse handler | `vsftpd_234_backdoor`, `ms17_010_eternalblue`, `samba/usermap_script`, `struts2_content_type_ognl`, `tomcat_jsp_upload_bypass`, `docker_daemon_tcp`, plus whatever `modules.search` returns |
 | **credentials** | default/weak-login checks, then credential **reuse** across services | `ssh_login`, `smb_login`, `ftp_login`, `mysql_login`, `vnc_login` |
@@ -109,10 +112,25 @@ adaptively and, on success, hands off to [`postexp`](core/postexp.py).
 ### Active vuln-scan phase (external tools)
 
 Between enumeration and exploitation, the **vulnscan** phase points a suite of
-best-in-class CLI tools at the target's web services and turns their output into
-findings that feed straight back into the plan (see
-[`webenum`](core/webenum.py) + the uniform external-tool runner
-[`tools`](core/tools.py)):
+best-in-class CLI tools at the target and turns their output into findings that
+feed straight back into the plan. It runs three independent passes, each
+optional and each widening the exploit phase that follows:
+
+**NSE vulnerability scan** ([`nse`](core/nse.py)) — `nmap --script vuln,vulners`
+over the discovered open ports. A host confirmed **VULNERABLE** to a known CVE
+(MS17-010, Shellshock, Drupalgeddon2, Struts S2-045, …) has its **exact
+Metasploit module injected at a high score** — the shortest path from an nmap
+finding to a ready-to-fire exploit. CVEs with no reliable module are still kept
+as report facts. Needs only `nmap`, which is already required.
+
+**SMB / AD enumeration** ([`smbenum`](core/smbenum.py)) — drives `netexec`
+(`nxc`, formerly `crackmapexec`) against SMB, the usual shortest path to a
+Windows shell. Anonymous/guest only here: host fingerprint (signing, SMBv1,
+domain), null-session share listing, and RID-brute user enumeration. The
+enumerated usernames are fed into every login module, and any anonymous or
+`Pwn3d!` credential becomes a `creds` finding that unlocks **psexec** -> a shell.
+
+**Web recon** ([`webenum`](core/webenum.py)) — against the target's web services:
 
 - `whatweb` — technology/product fingerprinting;
 - `nuclei` — thousands of template-based CVE / misconfig / exposure checks;
@@ -122,9 +140,12 @@ findings that feed straight back into the plan (see
 A product fingerprinted here (Drupal, Tomcat, Struts, Jenkins, …) or a path it
 uncovers (`/manager/html`, `/wp-login.php`, …) becomes a `product` finding,
 which the engine immediately converts into knowledge-base and version-matched
-exploit vectors **before** the exploit phase runs. Every tool is optional:
-whatever is not installed is skipped with a note, never a crash, so ShellCracker
-runs on whatever subset a given box has.
+exploit vectors **before** the exploit phase runs.
+
+All of it runs through the uniform external-tool runner
+[`tools`](core/tools.py): every tool is optional, and whatever is not installed
+is skipped with a note, never a crash, so ShellCracker runs on whatever subset a
+given box has.
 
 ### Three sources of attacks
 
@@ -137,7 +158,7 @@ depends on a single heuristic:
    redis, mongodb, rpc/nfs, snmp, smtp, pop3, rdp, vnc, finger, r-services,
    irc, java-rmi, …). Adding a technique is a one-line change.
 2. **Knowledge base of high-signal exploits** (`_KNOWN_EXPLOITS`) — curated
-   fingerprint → exploit rules for the classics (vsftpd 2.3.4, ProFTPD 1.3.3c,
+   fingerprint -> exploit rules for the classics (vsftpd 2.3.4, ProFTPD 1.3.3c,
    UnrealIRCd, Samba `usermap_script`, distcc, Java-RMI, Shellshock, PHP-CGI,
    Drupalgeddon2, EternalBlue, MS08-067) **and modern/high-prevalence targets**
    (Struts2 S2-045/S2-057, Tomcat JSP-upload + Manager, Jenkins, JBoss, CouchDB,
@@ -154,7 +175,7 @@ Within a phase, higher-scored vectors go first:
 ```
 score = category_weight          (smb/ftp/web rank above dns/finger)
       + rank_points               (MSF reliability: excellent … manual)
-      + version_match_points      (exact product+version in the module → +20)
+      + version_match_points      (exact product+version in the module -> +20)
       + killer_bonus              (curated knowledge-base exploits)
       - noise_penalty             (credential spraying scores lower)
 ```
@@ -166,11 +187,11 @@ All weights live under `strategy.weights` in the config.
 This is what makes it autonomous — enumeration findings are fed back into the
 engine, which boosts or injects vectors mid-run:
 
-- `smb_ms17_010` reports *vulnerable* → **EternalBlue** is promoted to top score.
-- a valid credential is found → it is **reused** against every other login
+- `smb_ms17_010` reports *vulnerable* -> **EternalBlue** is promoted to top score.
+- a valid credential is found -> it is **reused** against every other login
   service, and credential-gated exploits (**psexec**, Tomcat Manager upload,
   Postgres/MySQL payload) are unlocked for it.
-- anonymous FTP / null SMB session / NFS exports / refined product banners →
+- anonymous FTP / null SMB session / NFS exports / refined product banners ->
   recorded as facts and used to widen the plan.
 
 ### Post-exploitation
@@ -194,9 +215,9 @@ behind `strategy.allow_dangerous`.
 |---|---|
 | Recon | `nmap -sV -Pn` (+`-O`/`-sC` optional), XML parsed into structured services |
 | Profile | OS-family inference + per-category service grouping into a `TargetProfile` |
-| Strategy | per-category decision tree + MSF search → a scored, phased `AttackPlan` |
+| Strategy | per-category decision tree + MSF search -> a scored, phased `AttackPlan` |
 | Enumerate | auxiliary scanners gather intel; findings feed back into the plan |
-| Vuln-scan | external web tools (`whatweb`/`nuclei`/`gobuster`/`nikto`) widen the plan |
+| Vuln-scan | NSE vuln scan (CVE -> exact module) + `netexec` SMB/AD enum + web tools (`whatweb`/`nuclei`/`gobuster`/`nikto`) widen the plan |
 | Brute-force | `hydra` wordlist attacks on login services; a hit is tried into a session |
 | Exploit | knowledge-base + version-matched modules, `check()` dry-run, fired by score |
 | Credentials | default/weak-login checks + reuse; a success can drop a session directly |
@@ -235,7 +256,9 @@ Siber-ShellCracker/
 │   ├── strategy.py       # the brain: profile -> scored, phased AttackPlan
 │   ├── matcher.py        # services -> ranked candidate exploits (MSF + EDB)
 │   ├── tools.py          # uniform external-CLI runner (which/run/timeout)
-│   ├── webenum.py        # vulnscan phase: whatweb/nuclei/gobuster/nikto -> findings
+│   ├── nse.py            # vulnscan: nmap NSE vuln/vulners -> CVE -> exploit vectors
+│   ├── smbenum.py        # vulnscan: netexec SMB/AD enum (shares/users/Pwn3d)
+│   ├── webenum.py        # vulnscan: whatweb/nuclei/gobuster/nikto -> findings
 │   ├── bruteforce.py     # bruteforce phase: hydra credential attacks -> findings
 │   ├── executor.py       # msfrpc: run exploit/aux/login vectors, adaptive loop
 │   ├── postexp.py        # post-exploitation: whoami, privesc, loot after a shell
@@ -256,7 +279,7 @@ Siber-ShellCracker/
 | Python 3.12+ | with `python-nmap`, `pymetasploit3`, `PyYAML` |
 | nmap, searchsploit | standard on Kali |
 | Metasploit Framework | `msfconsole`, `msfrpcd`, `msfvenom` |
-| Web tools *(optional)* | `whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto` — power the vulnscan phase; skipped if absent |
+| Vuln-scan tools *(optional)* | `netexec`/`nxc` (SMB/AD enum), `whatweb`, `nuclei`, `gobuster`/`ffuf`, `nikto` (web); NSE vuln scan needs only `nmap`. All power the vulnscan phase; skipped if absent |
 | Cred tools *(optional)* | `hydra` (bruteforce phase), `john`/`hashcat` (offline hash cracking); skipped if absent |
 | Linux + root | nmap `-sV` and `msfrpcd` run best as root |
 | Lab network access | a reachable target you are authorized to test |

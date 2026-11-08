@@ -9,13 +9,19 @@ PyYAML>=6.0
 #
 #   core engine : nmap, metasploit-framework (msfconsole, msfrpcd, msfvenom),
 #                 searchsploit (exploitdb)
-#   vulnscan    : whatweb, nuclei, gobuster (or ffuf), nikto
+#   vulnscan    : nmap NSE vuln scripts (nmap itself) + vulners script,
+#                 netexec (nxc) / crackmapexec for SMB/AD,
+#                 whatweb, nuclei, gobuster (or ffuf), nikto for web
 #   bruteforce  : hydra
 #   hash crack  : john (john-the-ripper) and/or hashcat  + a wordlist (rockyou)
 #
 # On Kali:
-#   sudo apt install -y nmap metasploit-framework exploitdb \
+#   sudo apt install -y nmap metasploit-framework exploitdb netexec \
 #       whatweb nikto gobuster ffuf hydra john hashcat wordlists
+#   # netexec is also packaged as crackmapexec on older Kali; or:
+#   #   pipx install git+https://github.com/Pennyw0rth/NetExec
+#   # the nmap "vulners" NSE script ships with nmap; update scripts with:
+#   #   sudo nmap --script-updatedb
 #   # nuclei (Go): sudo apt install -y nuclei   OR
 #   #   go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 #   nuclei -update-templates
