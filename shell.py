@@ -309,7 +309,36 @@ def main(argv: list[str] | None = None) -> int:
         help="On success, attach to the session in THIS window instead of "
         "opening a new terminal window (the default).",
     )
+    parser.add_argument(
+        "--check", "--kontrol",
+        dest="check",
+        action="store_true",
+        help="Show which required/optional tools are installed and exit "
+        "(no target needed).",
+    )
+    parser.add_argument(
+        "--kur", "--setup",
+        dest="kur",
+        action="store_true",
+        help="Install the missing tools via apt (and pip deps), then exit. "
+        "Needs a Kali/Debian/Ubuntu box.",
+    )
+    parser.add_argument(
+        "-y", "--evet",
+        dest="assume_yes",
+        action="store_true",
+        help="Answer yes automatically (used with --kur).",
+    )
     args = parser.parse_args(argv)
+
+    # Dependency doctor: these run without a target and exit immediately.
+    if args.check or args.kur:
+        from core import doctor
+
+        if args.kur:
+            return doctor.install_missing(assume_yes=args.assume_yes)
+        doctor.report()
+        return 0
 
     _startup()  # clear + loading animation + welcome (skipped if not a TTY)
 

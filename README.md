@@ -268,7 +268,9 @@ Siber-ShellCracker/
 │   ├── postexp.py        # post-exploitation: whoami, privesc, loot after a shell
 │   ├── interactive.py    # interactive bridge to a live session
 │   ├── reporter.py       # JSON + Markdown report (optional)
+│   ├── doctor.py         # dependency check + installer (--check / --kur)
 │   └── colors.py         # dependency-free ANSI colouring
+├── setup.sh              # one-command installer (Kali/Debian/Ubuntu)
 ├── config.yaml.example   # copy to config.yaml (sane lab defaults)
 ├── requirements.txt
 └── LICENSE
@@ -288,6 +290,12 @@ Siber-ShellCracker/
 | Linux + root | nmap `-sV` and `msfrpcd` run best as root |
 | Lab network access | a reachable target you are authorized to test |
 
+Not sure what you have installed? `python3 shell.py --check` prints a
+present/missing table for every tool above, and `sudo python3 shell.py --kur`
+(or `sudo ./setup.sh`) installs whatever is missing via `apt` + `pip`. Every
+optional tool is skipped gracefully when absent, so ShellCracker still runs on a
+partial install.
+
 ---
 
 ## Installation
@@ -296,9 +304,14 @@ Siber-ShellCracker/
 git clone https://github.com/osmnabyram/Siber-ShellCracker.git
 cd Siber-ShellCracker
 
-pip install -r requirements.txt
+# One-command install of every tool + Python dep (Kali/Debian/Ubuntu):
+sudo ./setup.sh
 cp config.yaml.example config.yaml
 ```
+
+Prefer to do it by hand? `pip install -r requirements.txt` for the Python deps,
+then `python3 shell.py --check` to see which external tools are missing and
+`sudo python3 shell.py --kur` to install them.
 
 Defaults work out of the box for a local lab: `handler.lhost` is `auto`
 (detected from the route to the target) and `msfrpcd` is auto-started with the
@@ -346,6 +359,8 @@ python3 shell.py --target 192.168.56.101
 | `--config <path>` | Config file (default `config.yaml`). |
 | `--rapor` | Write JSON + Markdown report, logfile and raw nmap XML to `reports/` (off by default). |
 | `--ayni-pencere` | Attach to the shell in THIS window instead of opening a new terminal. |
+| `--check` | Print a present/missing table for every required/optional tool, then exit. |
+| `--kur` | Install the missing tools via `apt` + `pip`, then exit (add `-y` to skip the prompt). |
 
 Exit codes: `0` success / clean no-op, `1` cancelled or error, `3` msfrpc
 unreachable, `4` no shell obtained.
