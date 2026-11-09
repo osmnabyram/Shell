@@ -755,7 +755,13 @@ class StrategyEngine:
                 self.profile.notes.append(f"NFS disa acik paylasim: {f.value}")
 
             elif f.key == "creds":
-                user, pw = f.value
+                # value should be a (user, password) pair; skip anything else
+                # rather than letting a malformed finding abort the whole run.
+                try:
+                    user, pw = f.value
+                except (TypeError, ValueError):
+                    logger.debug("gecersiz 'creds' bulgu degeri atlandi: %r", f.value)
+                    continue
                 self.profile.add_credential(f.category, f.port, user, pw)
                 new.extend(self._on_credential(f.category, user, pw))
 

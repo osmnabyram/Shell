@@ -700,10 +700,16 @@ class Executor:
                 record = self.execute_vector(vector)
                 records.append(record)
 
-                # Adaptive feedback from enumeration/credential findings.
+                # Adaptive feedback from enumeration/credential findings. A bug
+                # while digesting a finding must never abort the exploitation
+                # run -- isolate it so the plan keeps going with what it has.
                 found = getattr(record, "_findings_obj", None)
                 if found:
-                    new_vectors = engine.incorporate(found)
+                    try:
+                        new_vectors = engine.incorporate(found)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Bulgular islenirken hata (atlandi): %s", exc)
+                        new_vectors = []
                     for nv in new_vectors:
                         logger.info("  +adaptif: %s (skor=%.0f) — %s",
                                     nv.module, nv.score, nv.rationale)
@@ -740,7 +746,11 @@ class Executor:
         all_findings += self._web_enum(engine, records)
 
         if all_findings:
-            new_vectors = engine.incorporate(all_findings)
+            try:
+                new_vectors = engine.incorporate(all_findings)
+            except Exception as exc:  # noqa: BLE001 - never let it break the run
+                logger.warning("vulnscan bulgulari islenirken hata (atlandi): %s", exc)
+                new_vectors = []
             for nv in new_vectors:
                 logger.info("  +vulnscan->plan: %s (skor=%.0f) — %s",
                             nv.module, nv.score, nv.rationale)
