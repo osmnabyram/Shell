@@ -377,7 +377,19 @@ Auto-start covers the common case. To run the daemon manually (for example to
 watch its output), start it first and ShellCracker will reuse it:
 
 ```bash
-msfrpcd -U msf -P msf -p 55553 -a 127.0.0.1
+msfrpcd -f -U msf -P msf -p 55553 -a 127.0.0.1
+```
+
+### msfrpcd baslamiyor / "beklenmedik sekilde kapandi"
+
+The daemon is launched with `-f` (foreground) so ShellCracker can track it; on
+the **first** run Metasploit loads the whole framework, which can take up to a
+couple of minutes before the port opens (ShellCracker waits for it). If it still
+exits immediately, run the command above by hand to read the error. The usual
+cause is an uninitialised database:
+
+```bash
+sudo msfdb init
 ```
 
 ---

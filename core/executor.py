@@ -116,12 +116,28 @@ def connect(
 def start_msfrpcd(
     host: str, port: int, user: str, password: str, ssl: bool = True
 ) -> subprocess.Popen:
-    """Launch msfrpcd in the background and return the process handle."""
-    cmd = ["msfrpcd", "-U", user, "-P", password, "-p", str(port), "-a", host]
+    """Launch msfrpcd and return the process handle.
+
+    ``-f`` runs it in the FOREGROUND so the returned Popen handle *is* the real
+    daemon. Without it msfrpcd double-forks and the parent exits 0 within a
+    second -- which looks exactly like a crash to ``poll()`` even though the
+    listener is (slowly) coming up. stdout/stderr are captured so that, if it
+    genuinely dies, we can show the user why instead of a bare exit code.
+    """
+    cmd = ["msfrpcd", "-f", "-U", user, "-P", password, "-p", str(port), "-a", host]
     if not ssl:
         cmd.append("-S")  # -S disables SSL
     logger.info("msfrpcd baslatiliyor: %s", " ".join(cmd))
-    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Send output to a log file rather than a PIPE: msfrpcd runs for the whole
+    # session with -f, and an unread PIPE would fill (~64KB) and deadlock it.
+    # The file lets us show the startup error if it dies early.
+    log = tempfile.NamedTemporaryFile(
+        prefix="shellcracker_msfrpcd_", suffix=".log", delete=False, mode="w"
+    )
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, text=True)
+    proc._sc_logpath = log.name  # type: ignore[attr-defined]
+    log.close()
+    return proc
 
 
 def connect_or_start(
@@ -130,7 +146,7 @@ def connect_or_start(
     user: str,
     password: str,
     ssl: bool = True,
-    boot_timeout: int = 60,
+    boot_timeout: int = 150,
 ) -> tuple[Any, subprocess.Popen | None]:
     """Connect to msfrpcd, auto-starting the daemon if it is not running.
 
@@ -155,15 +171,36 @@ def connect_or_start(
         )
 
     proc = start_msfrpcd(host, port, user, password, ssl)
+    logger.info("  Metasploit framework yukleniyor; bu ilk acilista uzun "
+                "surebilir (en fazla %d sn bekleniyor)...", boot_timeout)
     deadline = time.time() + boot_timeout
     last_err = ""
     while time.time() < deadline:
         if proc.poll() is not None:
-            raise MsfConnectionError(
+            # With -f the daemon runs in the foreground, so an early exit is a
+            # real failure -- show its own output, which usually names the cause
+            # (missing DB, bad password, port already bound, ...).
+            out = ""
+            logpath = getattr(proc, "_sc_logpath", "")
+            if logpath:
+                try:
+                    with open(logpath, encoding="utf-8", errors="replace") as fh:
+                        out = fh.read()
+                except Exception:  # noqa: BLE001
+                    out = ""
+            detail = out.strip().splitlines()[-5:] if out.strip() else []
+            msg = (
                 f"msfrpcd baslatildi ama beklenmedik sekilde kapandi "
-                f"(cikis kodu {proc.returncode}). 'msfrpcd' komutunu elle "
-                "calistirip hatayi gorebilirsin."
+                f"(cikis kodu {proc.returncode})."
             )
+            if detail:
+                msg += "\n    msfrpcd ciktisi:\n      " + "\n      ".join(detail)
+            else:
+                msg += ("\n    'msfrpcd -f -U msf -P msf -p 55553 -a 127.0.0.1' "
+                        "komutunu elle calistirip hatayi gorebilirsin.")
+            msg += ("\n    Sik neden: Metasploit veritabani kurulmamis -> "
+                    "'sudo msfdb init' calistir.")
+            raise MsfConnectionError(msg)
         try:
             client = connect(host, port, user, password, ssl)
             logger.info("msfrpcd otomatik baslatildi ve baglanildi.")
